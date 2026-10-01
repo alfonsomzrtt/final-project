@@ -1,0 +1,27 @@
+# Virtual Environment
+/venv/
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# files and folders that dont really important right now
+gui-prototipe.py
+game_gui_mystery.py
+game_gui_mystery2.py
+prototipe/
+test.py
+skrip_python-jetson.py
+cobateshasiltraining.py
+contoh-cepat/
+test_camera.py
+
+
+
+# Logs
+*.log
+
