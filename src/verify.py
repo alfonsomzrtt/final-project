@@ -211,7 +211,9 @@ check(
         PatternResult(
             correct=True,
             accuracy=0.96,
+            elapsed_time=18.0,
             time_left=12,
+            score=120,
         )
     ),
 )
@@ -222,13 +224,17 @@ check(
         lambda result: (
             assert_(result.correct is True),
             assert_(result.accuracy == 0.96),
+            assert_(result.elapsed_time == 18.0),
             assert_(result.time_left == 12),
+            assert_(result.score == 120),
         )
     )(
         PatternResult(
             correct=True,
             accuracy=0.96,
+            elapsed_time=18.0,
             time_left=12,
+            score=120,
         )
     ),
 )
@@ -240,7 +246,9 @@ check(
             lambda: PatternResult(
                 correct=True,
                 accuracy=1.1,
+                elapsed_time=18.0,
                 time_left=12,
+                score=120,
             )
         )
     ),
@@ -253,7 +261,9 @@ check(
             lambda: PatternResult(
                 correct=True,
                 accuracy=-0.1,
+                elapsed_time=18.0,
                 time_left=12,
+                score=120,
             )
         )
     ),
@@ -266,7 +276,9 @@ check(
             lambda: PatternResult(
                 correct=True,
                 accuracy=0.96,
+                elapsed_time=31.0,
                 time_left=-1,
+                score=0,
             )
         )
     ),
@@ -362,14 +374,11 @@ check(
 # ─────────────────────────────────────────────────────────────────────────────
 # game.scoring
 # ─────────────────────────────────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────────
-# game.scoring
-# ─────────────────────────────────────────────────────────────────────────────
 
 print("\n── game.scoring ─────────────────────────")
 
 from game.scoring import Scoring
-
+from core.enums import Player
 
 check(
     "import game.scoring",
@@ -383,59 +392,41 @@ check(
 
 check(
     "correct pattern points",
-    lambda: assert_(
-        Scoring.pattern_points(True) == 1
-    ),
+    lambda: assert_(Scoring.pattern_points(True, 12) == 120),
 )
 
 check(
     "incorrect pattern points",
+    lambda: assert_(Scoring.pattern_points(False, 12) == 0),
+)
+
+check(
+    "stage winner by completion time",
     lambda: assert_(
-        Scoring.pattern_points(False) == 0
+        Scoring.determine_stage_winner(40.0, 45.0, 300, 500)
+        == Player.PLAYER_1
     ),
 )
 
 check(
-    "stage winner Player 1",
+    "stage winner by score tie-breaker",
     lambda: assert_(
-        Scoring.determine_stage_winner(3, 2)
-        == __import__("core.enums", fromlist=["Player"])
-        .Player.PLAYER_1
+        Scoring.determine_stage_winner(40.0, 40.0, 300, 250)
+        == Player.PLAYER_1
     ),
 )
 
 check(
-    "stage winner Player 2",
+    "stage tie when time and score equal",
     lambda: assert_(
-        Scoring.determine_stage_winner(2, 3)
-        == __import__("core.enums", fromlist=["Player"])
-        .Player.PLAYER_2
+        Scoring.determine_stage_winner(40.0, 40.0, 300, 300) is None
     ),
 )
 
-check(
-    "stage tie",
-    lambda: assert_(
-        Scoring.determine_stage_winner(2, 2) is None
-    ),
-)
-
-check(
-    "game winner threshold",
-    lambda: assert_(
-        Scoring.is_game_winner(2)
-    ),
-)
-
-check(
-    "not game winner below threshold",
-    lambda: assert_(
-        not Scoring.is_game_winner(1)
-    ),
-)
+check("game winner threshold", lambda: assert_(Scoring.is_game_winner(2)))
+check("not game winner below threshold", lambda: assert_(not Scoring.is_game_winner(1)))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # game.timer
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -519,107 +510,131 @@ check(
 print("\n── game.game_manager ───────────────────")
 
 from game.game_manager import GameManager
-from core.enums import GamePhase, Difficulty
+from core.enums import GamePhase, Difficulty, Player
 from core.results import PatternResult
 
+def pattern(correct=True, elapsed=10.0, time_left=20, score=200, accuracy=1.0):
+    return PatternResult(
+        correct=correct,
+        accuracy=accuracy,
+        elapsed_time=elapsed,
+        time_left=time_left,
+        score=score,
+    )
 
-check(
-    "import game.game_manager",
-    lambda: __import__("game.game_manager"),
-)
-
-check(
-    "GameManager instance",
-    lambda: assert_(
-        GameManager()
-    ),
-)
-
+check("import game.game_manager", lambda: __import__("game.game_manager"))
+check("GameManager instance", lambda: assert_(GameManager()))
 check(
     "GameManager starts in LOBBY",
-    lambda: (
-        lambda manager: assert_(
-            manager.state.phase == GamePhase.LOBBY
-        )
-    )(
-        GameManager()
-    ),
+    lambda: assert_(GameManager().state.phase == GamePhase.LOBBY),
 )
-
 check(
     "GameManager.start_game()",
     lambda: (
         lambda manager: (
             manager.start_game(Difficulty.EASY),
-            assert_(
-                manager.state.phase == GamePhase.PLAYING
-            ),
+            assert_(manager.state.phase == GamePhase.PLAYING),
         )
-    )(
-        GameManager()
-    ),
+    )(GameManager()),
 )
-
 check(
     "GameManager current pattern",
     lambda: (
         lambda manager: (
             manager.start_game(Difficulty.EASY),
-            assert_(
-                manager.get_current_pattern().startswith("E")
-            ),
+            assert_(manager.get_current_pattern().startswith("E")),
         )
-    )(
-        GameManager()
-    ),
+    )(GameManager()),
 )
-
 check(
-    "GameManager correct pattern",
+    "Pattern result adds time-based score",
     lambda: (
         lambda manager: (
             manager.start_game(Difficulty.EASY),
-            manager.complete_pattern(
-                PatternResult(
-                    correct=True,
-                    accuracy=1.0,
-                    time_left=10,
-                )
-            ),
+            manager.complete_pattern(pattern(elapsed=15.0, time_left=15, score=150)),
             assert_(
-                manager.state.score_player_1 == 1
-                and manager.state.stage_score_player_1 == 1
+                manager.state.score_player_1 == 150
+                and manager.state.stage_score_player_1 == 150
+                and manager.state.stage_time_player_1 == 15.0
+                and manager.state.pattern_progress_player_1 == 1
                 and manager.state.current_pattern == 2
             ),
         )
-    )(
-        GameManager()
-    ),
+    )(GameManager()),
 )
-
 check(
-    "GameManager incorrect pattern",
+    "Timeout result adds zero score",
     lambda: (
         lambda manager: (
             manager.start_game(Difficulty.EASY),
             manager.complete_pattern(
-                PatternResult(
-                    correct=False,
-                    accuracy=0.4,
-                    time_left=0,
-                )
+                pattern(correct=False, elapsed=30.0, time_left=0, score=0, accuracy=0.4)
             ),
             assert_(
                 manager.state.score_player_1 == 0
                 and manager.state.stage_score_player_1 == 0
+                and manager.state.stage_time_player_1 == 30.0
                 and manager.state.current_pattern == 2
             ),
         )
-    )(
-        GameManager()
-    ),
+    )(GameManager()),
 )
-# ─────────────────────────────────────────────────────────────────────────────
+check(
+    "Player 1 completes stage patterns then Player 2 starts",
+    lambda: (
+        lambda manager: (
+            manager.start_game(Difficulty.EASY),
+            [manager.complete_pattern(pattern()) for _ in range(5)],
+            assert_(
+                manager.state.active_player == Player.PLAYER_2
+                and manager.state.current_pattern == 1
+                and manager.state.pattern_progress_player_1 == 5
+                and manager.state.phase == GamePhase.PLAYING
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "Stage winner uses completion time first",
+    lambda: (
+        lambda manager: (
+            manager.start_game(Difficulty.EASY),
+            [manager.complete_pattern(pattern(elapsed=10.0, time_left=20, score=200)) for _ in range(5)],
+            [manager.complete_pattern(pattern(elapsed=11.0, time_left=19, score=190)) for _ in range(5)],
+            assert_(
+                manager.state.stage_wins_player_1 == 1
+                and manager.state.stage_wins_player_2 == 0
+                and manager.state.phase == GamePhase.STAGE_RESULT
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "Next stage resets stage-specific state",
+    lambda: (
+        lambda manager: (
+            manager.start_game(Difficulty.EASY),
+            [manager.complete_pattern(pattern()) for _ in range(5)],
+            [manager.complete_pattern(pattern(elapsed=11.0, time_left=19, score=190)) for _ in range(5)],
+            manager.next_stage(),
+            assert_(
+                manager.state.current_stage == 2
+                and manager.state.current_pattern == 1
+                and manager.state.stage_score_player_1 == 0
+                and manager.state.stage_score_player_2 == 0
+                and manager.state.stage_time_player_1 == 0.0
+                and manager.state.stage_time_player_2 == 0.0
+                and manager.state.stage_wins_player_1 == 1
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "Sudden death phase exists",
+    lambda: assert_(GamePhase.SUDDEN_DEATH),
+)
+
+
 # vision.preprocessing
 # ─────────────────────────────────────────────────────────────────────────────
 
