@@ -9,14 +9,16 @@ It should not contain GUI code or computer vision processing.
 
 from core.enums import GamePhase, Difficulty, Player
 from core.state import GameState
-from config.constants import (
-    TOTAL_STAGES,
-    PATTERNS_PER_STAGE,
-)
+from core.results import PatternResult
+# from config.constants import (
+#     TOTAL_STAGES,
+#     PATTERNS_PER_STAGE,
 from game.level_manager import LevelManager
 from game.puzzle_loader import PuzzleLoader
 from game.scoring import Scoring
 from game.timer import GameTimer
+
+
 
 
 class GameManager:
@@ -37,14 +39,8 @@ class GameManager:
             current_stage=1,
             current_pattern=1,
             active_player=Player.PLAYER_1,
-        
-            # score_player_1=0,
-            # score_player_2=0,
-            # stage_wins_player_1=0,
-            # stage_wins_player_2=0,
          )
         
-        self.scoring.reset()
         self.puzzle_loader.reset()
         self.puzzle_loader.load_game_patterns(difficulty)
 
@@ -58,27 +54,29 @@ class GameManager:
         self.state.phase = GamePhase.PLAYING
         self.timer.start()
 
-    def complete_pattern(self, player: Player):
-        """
-        Handle a completed pattern.
+    def complete_pattern(self, result: PatternResult):
+        """ Handle the result of the current pattern """
 
-        The scoring system is intentionally kept separate for now.
-        """
-
-        self.scoring.add_pattern_point(player)
 
         self.timer.stop()
+
+        points = self.scoring.pattern_points(result.correct)
+
+        if self.state.active_player == Player.PLAYER_1:
+            self.state.score_player_1 += points
+            self.state.stage_score_player_1 += points
+
+        else:
+            self.state.score_player_2 += points
+            self.state.stage_score_player_2 += points
 
         has_next_pattern = self.level_manager.next_pattern(
             self.state
         )
+
         if not has_next_pattern:
             self.state.phase = GamePhase.STAGE_RESULT
 
-    # def _complete_stage(self):
-    #     """Handle completion of the current stage."""
-
-    #     self.state.phase = GamePhase.STAGE_RESULT
 
     def next_stage(self):
         """Move to the next stage."""
@@ -121,5 +119,4 @@ class GameManager:
         
         self.level_manager.reset(self.state)
         self.puzzle_loader.reset()
-        self.scoring.reset()
         self.timer.reset()

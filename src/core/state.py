@@ -27,9 +27,13 @@ class GameState:
     score_player_1: int = 0
     score_player_2: int = 0
 
+    stage_score_player_1: int = 0
+    stage_score_player_2: int = 0
+
     # STAGE WINS
     stage_wins_player_1: int = 0
     stage_wins_player_2: int = 0
 
     # ACTIVE PLAYER
     active_player: Player = Player.PLAYER_1
+

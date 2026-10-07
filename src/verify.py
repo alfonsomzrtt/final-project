@@ -165,6 +165,113 @@ check(
     ),
 )
 
+check(
+    "GameState default total scores",
+    lambda: assert_(
+        __import__("core.state", fromlist=["GameState"])
+        .GameState()
+        .score_player_1 == 0
+        and
+        __import__("core.state", fromlist=["GameState"])
+        .GameState()
+        .score_player_2 == 0
+    ),
+)
+
+check(
+    "GameState default stage scores",
+    lambda: assert_(
+        __import__("core.state", fromlist=["GameState"])
+        .GameState()
+        .stage_score_player_1 == 0
+        and
+        __import__("core.state", fromlist=["GameState"])
+        .GameState()
+        .stage_score_player_2 == 0
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# core.results
+# ─────────────────────────────────────────────────────────────────────────────
+
+print("\n── core.results ─────────────────────────")
+
+from core.results import PatternResult
+
+
+check(
+    "import core.results",
+    lambda: __import__("core.results"),
+)
+
+check(
+    "PatternResult instance",
+    lambda: assert_(
+        PatternResult(
+            correct=True,
+            accuracy=0.96,
+            time_left=12,
+        )
+    ),
+)
+
+check(
+    "PatternResult values",
+    lambda: (
+        lambda result: (
+            assert_(result.correct is True),
+            assert_(result.accuracy == 0.96),
+            assert_(result.time_left == 12),
+        )
+    )(
+        PatternResult(
+            correct=True,
+            accuracy=0.96,
+            time_left=12,
+        )
+    ),
+)
+
+check(
+    "PatternResult rejects accuracy > 1",
+    lambda: assert_(
+        _raises_value_error(
+            lambda: PatternResult(
+                correct=True,
+                accuracy=1.1,
+                time_left=12,
+            )
+        )
+    ),
+)
+
+check(
+    "PatternResult rejects accuracy < 0",
+    lambda: assert_(
+        _raises_value_error(
+            lambda: PatternResult(
+                correct=True,
+                accuracy=-0.1,
+                time_left=12,
+            )
+        )
+    ),
+)
+
+check(
+    "PatternResult rejects negative time",
+    lambda: assert_(
+        _raises_value_error(
+            lambda: PatternResult(
+                correct=True,
+                accuracy=0.96,
+                time_left=-1,
+            )
+        )
+    ),
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # game.level_manager
@@ -255,8 +362,14 @@ check(
 # ─────────────────────────────────────────────────────────────────────────────
 # game.scoring
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# game.scoring
+# ─────────────────────────────────────────────────────────────────────────────
 
 print("\n── game.scoring ─────────────────────────")
+
+from game.scoring import Scoring
+
 
 check(
     "import game.scoring",
@@ -265,23 +378,59 @@ check(
 
 check(
     "Scoring instance",
+    lambda: assert_(Scoring()),
+)
+
+check(
+    "correct pattern points",
     lambda: assert_(
-        __import__("game.scoring", fromlist=["Scoring"]).Scoring()
+        Scoring.pattern_points(True) == 1
     ),
 )
 
 check(
-    "add_pattern_point()",
-    lambda: (
-        lambda scoring: (
-            scoring.add_pattern_point(
-                __import__("core.enums", fromlist=["Player"])
-                .Player.PLAYER_1
-            ),
-            assert_(scoring.score_player_1 == 1),
-        )
-    )(
-        __import__("game.scoring", fromlist=["Scoring"]).Scoring()
+    "incorrect pattern points",
+    lambda: assert_(
+        Scoring.pattern_points(False) == 0
+    ),
+)
+
+check(
+    "stage winner Player 1",
+    lambda: assert_(
+        Scoring.determine_stage_winner(3, 2)
+        == __import__("core.enums", fromlist=["Player"])
+        .Player.PLAYER_1
+    ),
+)
+
+check(
+    "stage winner Player 2",
+    lambda: assert_(
+        Scoring.determine_stage_winner(2, 3)
+        == __import__("core.enums", fromlist=["Player"])
+        .Player.PLAYER_2
+    ),
+)
+
+check(
+    "stage tie",
+    lambda: assert_(
+        Scoring.determine_stage_winner(2, 2) is None
+    ),
+)
+
+check(
+    "game winner threshold",
+    lambda: assert_(
+        Scoring.is_game_winner(2)
+    ),
+)
+
+check(
+    "not game winner below threshold",
+    lambda: assert_(
+        not Scoring.is_game_winner(1)
     ),
 )
 
@@ -369,6 +518,11 @@ check(
 
 print("\n── game.game_manager ───────────────────")
 
+from game.game_manager import GameManager
+from core.enums import GamePhase, Difficulty
+from core.results import PatternResult
+
+
 check(
     "import game.game_manager",
     lambda: __import__("game.game_manager"),
@@ -377,8 +531,7 @@ check(
 check(
     "GameManager instance",
     lambda: assert_(
-        __import__("game.game_manager", fromlist=["GameManager"])
-        .GameManager()
+        GameManager()
     ),
 )
 
@@ -386,13 +539,10 @@ check(
     "GameManager starts in LOBBY",
     lambda: (
         lambda manager: assert_(
-            manager.state.phase
-            == __import__("core.enums", fromlist=["GamePhase"])
-            .GamePhase.LOBBY
+            manager.state.phase == GamePhase.LOBBY
         )
     )(
-        __import__("game.game_manager", fromlist=["GameManager"])
-        .GameManager()
+        GameManager()
     ),
 )
 
@@ -400,19 +550,13 @@ check(
     "GameManager.start_game()",
     lambda: (
         lambda manager: (
-            manager.start_game(
-                __import__("core.enums", fromlist=["Difficulty"])
-                .Difficulty.EASY
-            ),
+            manager.start_game(Difficulty.EASY),
             assert_(
-                manager.state.phase
-                == __import__("core.enums", fromlist=["GamePhase"])
-                .GamePhase.PLAYING
+                manager.state.phase == GamePhase.PLAYING
             ),
         )
     )(
-        __import__("game.game_manager", fromlist=["GameManager"])
-        .GameManager()
+        GameManager()
     ),
 )
 
@@ -420,18 +564,61 @@ check(
     "GameManager current pattern",
     lambda: (
         lambda manager: (
-            manager.start_game(
-                __import__("core.enums", fromlist=["Difficulty"])
-                .Difficulty.EASY
+            manager.start_game(Difficulty.EASY),
+            assert_(
+                manager.get_current_pattern().startswith("E")
             ),
-            assert_(manager.get_current_pattern().startswith("E")),
         )
     )(
-        __import__("game.game_manager", fromlist=["GameManager"])
-        .GameManager()
+        GameManager()
     ),
 )
 
+check(
+    "GameManager correct pattern",
+    lambda: (
+        lambda manager: (
+            manager.start_game(Difficulty.EASY),
+            manager.complete_pattern(
+                PatternResult(
+                    correct=True,
+                    accuracy=1.0,
+                    time_left=10,
+                )
+            ),
+            assert_(
+                manager.state.score_player_1 == 1
+                and manager.state.stage_score_player_1 == 1
+                and manager.state.current_pattern == 2
+            ),
+        )
+    )(
+        GameManager()
+    ),
+)
+
+check(
+    "GameManager incorrect pattern",
+    lambda: (
+        lambda manager: (
+            manager.start_game(Difficulty.EASY),
+            manager.complete_pattern(
+                PatternResult(
+                    correct=False,
+                    accuracy=0.4,
+                    time_left=0,
+                )
+            ),
+            assert_(
+                manager.state.score_player_1 == 0
+                and manager.state.stage_score_player_1 == 0
+                and manager.state.current_pattern == 2
+            ),
+        )
+    )(
+        GameManager()
+    ),
+)
 # ─────────────────────────────────────────────────────────────────────────────
 # vision.preprocessing
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1937,6 +2124,8 @@ def test_game_result_screen():
 
 
 check("game result screen", test_game_result_screen)
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
