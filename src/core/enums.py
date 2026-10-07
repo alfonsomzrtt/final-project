@@ -1,9 +1,4 @@
-"""
-Application enums.
-
-This module defines finite sets of states and options used across
-the game, vision, and user-interface components.
-"""
+"""Application enums."""
 
 from enum import Enum, auto
 
@@ -13,6 +8,7 @@ class GamePhase(Enum):
     PLAYING = auto()
     STAGE_RESULT = auto()
     GAME_RESULT = auto()
+    SUDDEN_DEATH = auto()
 
 
 class Difficulty(Enum):
