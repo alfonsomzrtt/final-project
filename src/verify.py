@@ -2,6 +2,8 @@
 
 import sys
 import os
+import time
+import tempfile
 
 # Gunakan Qt tanpa display fisik saat pengujian
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -107,6 +109,13 @@ check(
     "Difficulty enum",
     lambda: assert_(
         __import__("core.enums", fromlist=["Difficulty"]).Difficulty
+    ),
+)
+
+check(
+    "GridSize enum",
+    lambda: assert_(
+        __import__("core.enums", fromlist=["GridSize"]).GridSize
     ),
 )
 
@@ -339,13 +348,57 @@ check(
 )
 
 check(
-    "load 15 Easy patterns",
+    "supported grid sizes",
+    lambda: (
+        lambda loader: assert_(
+            __import__("core.enums", fromlist=["GridSize"])
+            .GridSize.TWO_BY_TWO in loader.supported_grid_sizes
+            and __import__("core.enums", fromlist=["GridSize"])
+            .GridSize.THREE_BY_THREE not in loader.supported_grid_sizes
+        )
+    )(
+        __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
+        .PuzzleLoader()
+    ),
+)
+
+check(
+    "load 15 Easy 2x2 patterns",
     lambda: (
         lambda loader: assert_(
             len(
                 loader.load_game_patterns(
+                    __import__("core.enums", fromlist=["GridSize"])
+                    .GridSize.TWO_BY_TWO,
                     __import__("core.enums", fromlist=["Difficulty"])
-                    .Difficulty.EASY
+                    .Difficulty.EASY,
+                )
+            ) == 15
+        )
+    )(
+        __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
+        .PuzzleLoader()
+    ),
+)
+
+check(
+    "load Normal and Hard 2x2 patterns",
+    lambda: (
+        lambda loader: assert_(
+            len(
+                loader.load_game_patterns(
+                    __import__("core.enums", fromlist=["GridSize"])
+                    .GridSize.TWO_BY_TWO,
+                    __import__("core.enums", fromlist=["Difficulty"])
+                    .Difficulty.NORMAL,
+                )
+            ) == 15
+            and len(
+                loader.load_game_patterns(
+                    __import__("core.enums", fromlist=["GridSize"])
+                    .GridSize.TWO_BY_TWO,
+                    __import__("core.enums", fromlist=["Difficulty"])
+                    .Difficulty.HARD,
                 )
             ) == 15
         )
@@ -360,13 +413,77 @@ check(
     lambda: (
         lambda loader: assert_(
             loader.load_game_patterns(
+                __import__("core.enums", fromlist=["GridSize"])
+                .GridSize.TWO_BY_TWO,
                 __import__("core.enums", fromlist=["Difficulty"])
-                .Difficulty.EASY
+                .Difficulty.EASY,
             )[0].startswith("E")
         )
     )(
         __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
         .PuzzleLoader()
+    ),
+)
+
+check(
+    "pattern matrix resolves to 2x2 grid",
+    lambda: (
+        lambda loader: (
+            lambda matrix: assert_(
+                len(matrix) == 2
+                and all(len(row) == 2 for row in matrix)
+                and all(
+                    cell in range(6)
+                    for row in matrix
+                    for cell in row
+                )
+            )
+        )(
+            loader.get_pattern_matrix(
+                "E01",
+                __import__("core.enums", fromlist=["GridSize"])
+                .GridSize.TWO_BY_TWO,
+            )
+        )
+    )(
+        __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
+        .PuzzleLoader()
+    ),
+)
+
+check(
+    "pattern bank IDs are unique",
+    lambda: (
+        lambda loader: (
+            lambda ids: assert_(len(ids) == len(set(ids)) == 60)
+        )(
+            [
+                pattern_id
+                for difficulty_map in loader.pattern_bank.values()
+                for patterns in difficulty_map.values()
+                for pattern_id in patterns
+            ]
+        )
+    )(
+        __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
+        .PuzzleLoader()
+    ),
+)
+
+check(
+    "3x3 pattern bank gap is explicit",
+    lambda: assert_(
+        _raises(
+            NotImplementedError,
+            lambda: __import__("game.puzzle_loader", fromlist=["PuzzleLoader"])
+            .PuzzleLoader()
+            .load_game_patterns(
+                __import__("core.enums", fromlist=["GridSize"])
+                .GridSize.THREE_BY_THREE,
+                __import__("core.enums", fromlist=["Difficulty"])
+                .Difficulty.EASY,
+            ),
+        )
     ),
 )
 
@@ -510,17 +627,30 @@ check(
 print("\n── game.game_manager ───────────────────")
 
 from game.game_manager import GameManager
-from core.enums import GamePhase, Difficulty, Player
-from core.results import PatternResult
+from core.enums import GamePhase, Difficulty, GridSize, Player
+from inspect import signature
+from unittest.mock import patch
 
-def pattern(correct=True, elapsed=10.0, time_left=20, score=200, accuracy=1.0):
-    return PatternResult(
-        correct=correct,
-        accuracy=accuracy,
-        elapsed_time=elapsed,
-        time_left=time_left,
-        score=score,
-    )
+
+def complete_after(manager, elapsed, correct=True, accuracy=1.0):
+    manager.start_pattern()
+    start_time = manager.timer.start_time
+    with patch(
+        "game.timer.time.monotonic",
+        return_value=start_time + elapsed,
+    ):
+        return manager.complete_pattern(correct, accuracy)
+
+
+def timeout_after(manager, elapsed):
+    manager.start_pattern()
+    start_time = manager.timer.start_time
+    with patch(
+        "game.timer.time.monotonic",
+        return_value=start_time + elapsed,
+    ):
+        return manager.timeout_pattern()
+
 
 check("import game.game_manager", lambda: __import__("game.game_manager"))
 check("GameManager instance", lambda: assert_(GameManager()))
@@ -532,7 +662,7 @@ check(
     "GameManager.start_game()",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
             assert_(manager.state.phase == GamePhase.PLAYING),
         )
     )(GameManager()),
@@ -541,41 +671,217 @@ check(
     "GameManager current pattern",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
             assert_(manager.get_current_pattern().startswith("E")),
         )
     )(GameManager()),
 )
 check(
-    "Pattern result adds time-based score",
+    "GameState stores grid size",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
-            manager.complete_pattern(pattern(elapsed=15.0, time_left=15, score=150)),
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.NORMAL),
             assert_(
-                manager.state.score_player_1 == 150
-                and manager.state.stage_score_player_1 == 150
-                and manager.state.stage_time_player_1 == 15.0
-                and manager.state.pattern_progress_player_1 == 1
-                and manager.state.current_pattern == 2
+                manager.state.grid_size == GridSize.TWO_BY_TWO
+                and manager.state.difficulty == Difficulty.NORMAL
             ),
         )
     )(GameManager()),
 )
 check(
-    "Timeout result adds zero score",
+    "GameManager resolves current 2x2 grid",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
-            manager.complete_pattern(
-                pattern(correct=False, elapsed=30.0, time_left=0, score=0, accuracy=0.4)
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.HARD),
+            (
+                lambda grid: assert_(
+                    len(grid) == 2
+                    and all(len(row) == 2 for row in grid)
+                    and all(
+                        cell in range(6)
+                        for row in grid
+                        for cell in row
+                    )
+                )
+            )(manager.get_current_pattern_grid()),
+        )
+    )(GameManager()),
+)
+check(
+    "GameManager supports all 2x2 difficulties",
+    lambda: (
+        lambda difficulty: (
+            lambda manager: (
+                manager.start_game(GridSize.TWO_BY_TWO, difficulty),
+                assert_(
+                    manager.state.grid_size == GridSize.TWO_BY_TWO
+                    and manager.state.difficulty == difficulty
+                    and manager.get_current_pattern_grid()
+                ),
+            )
+        )(GameManager())
+    )(
+        Difficulty.EASY
+    )
+    and (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.NORMAL),
+            assert_(manager.get_current_pattern_grid()),
+        )
+    )(GameManager())
+    and (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.HARD),
+            assert_(manager.get_current_pattern_grid()),
+        )
+    )(GameManager()),
+)
+check(
+    "GameManager rejects unsupported 3x3",
+    lambda: (
+        lambda manager: assert_(
+            _raises(
+                NotImplementedError,
+                lambda: manager.start_game(
+                    GridSize.THREE_BY_THREE,
+                    Difficulty.EASY,
+                ),
+            )
+            and manager.state.phase == GamePhase.LOBBY
+        )
+    )(GameManager()),
+)
+check(
+    "MATCHED result uses timer and scoring authority",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            (
+                lambda result: assert_(
+                    result.correct is True
+                    and result.accuracy == 0.985
+                    and result.elapsed_time == 4.75
+                    and result.time_left == 25
+                    and result.score == 250
+                    and manager.state.score_player_1 == 250
+                    and manager.state.stage_score_player_1 == 250
+                    and manager.state.stage_time_player_1 == 4.75
+                    and manager.state.pattern_progress_player_1 == 1
+                    and manager.state.current_pattern == 2
+                    and not manager.timer.running
+                    and manager.timer.elapsed_time() == 4.75
+                )
+            )(complete_after(manager, elapsed=4.75, accuracy=0.985)),
+        )
+    )(GameManager()),
+)
+check(
+    "NOT MATCHED completion records no score",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            complete_after(
+                manager,
+                elapsed=2.0,
+                correct=False,
+                accuracy=0.4,
             ),
             assert_(
                 manager.state.score_player_1 == 0
                 and manager.state.stage_score_player_1 == 0
-                and manager.state.stage_time_player_1 == 30.0
+                and manager.state.stage_time_player_1 == 2.0
                 and manager.state.current_pattern == 2
+                and manager.state.pattern_progress_player_1 == 1
             ),
+        )
+    )(GameManager()),
+)
+check(
+    "timeout before expiry leaves pattern active",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            assert_(timeout_after(manager, 1.0) is None),
+            assert_(
+                manager.timer.running
+                and manager.state.current_pattern == 1
+                and manager.state.pattern_progress_player_1 == 0
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "expired timeout creates zero-score result and advances pattern",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            (
+                lambda result: assert_(
+                    result is not None
+                    and result.correct is False
+                    and result.accuracy == 0.0
+                    and result.elapsed_time == manager.timer.time_limit
+                    and result.time_left == 0
+                    and result.score == 0
+                    and manager.state.score_player_1 == 0
+                    and manager.state.stage_time_player_1
+                    == manager.timer.time_limit
+                    and manager.state.current_pattern == 2
+                    and manager.state.pattern_progress_player_1 == 1
+                    and not manager.timer.running
+                )
+            )(timeout_after(manager, manager.timer.time_limit)),
+        )
+    )(GameManager()),
+)
+check(
+    "complete_pattern requires an active timer",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            assert_(
+                _raises(
+                    RuntimeError,
+                    lambda: manager.complete_pattern(True, 1.0),
+                )
+            ),
+            assert_(manager.state.current_pattern == 1),
+        )
+    )(GameManager()),
+)
+check(
+    "complete_pattern rejects injected result values",
+    lambda: assert_(
+        tuple(signature(GameManager.complete_pattern).parameters)
+        == ("self", "correct", "accuracy")
+    ),
+)
+check(
+    "complete_pattern validates detection values",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            manager.start_pattern(),
+            assert_(
+                _raises(
+                    TypeError,
+                    lambda: getattr(manager, "complete_pattern")(
+                        "yes",
+                        1.0,
+                    ),
+                )
+                and _raises(
+                    TypeError,
+                    lambda: getattr(manager, "complete_pattern")(
+                        True,
+                        True,
+                    ),
+                )
+                and _raises_value_error(
+                    lambda: manager.complete_pattern(True, 1.01)
+                )
+            ),
+            manager.timer.reset(),
         )
     )(GameManager()),
 )
@@ -583,8 +889,8 @@ check(
     "Player 1 completes stage patterns then Player 2 starts",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
-            [manager.complete_pattern(pattern()) for _ in range(5)],
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            [complete_after(manager, elapsed=1.0) for _ in range(5)],
             assert_(
                 manager.state.active_player == Player.PLAYER_2
                 and manager.state.current_pattern == 1
@@ -595,14 +901,47 @@ check(
     )(GameManager()),
 )
 check(
-    "Stage winner uses completion time first",
+    "Stage winner uses completion time first and is exposed",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
-            [manager.complete_pattern(pattern(elapsed=10.0, time_left=20, score=200)) for _ in range(5)],
-            [manager.complete_pattern(pattern(elapsed=11.0, time_left=19, score=190)) for _ in range(5)],
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            [complete_after(manager, elapsed=10.0) for _ in range(5)],
+            [complete_after(manager, elapsed=11.0) for _ in range(5)],
             assert_(
                 manager.state.stage_wins_player_1 == 1
+                and manager.state.stage_wins_player_2 == 0
+                and manager.state.stage_winner == Player.PLAYER_1
+                and manager.state.phase == GamePhase.STAGE_RESULT
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "Stage winner can be Player 2",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            [complete_after(manager, elapsed=11.0) for _ in range(5)],
+            [complete_after(manager, elapsed=10.0) for _ in range(5)],
+            assert_(
+                manager.state.stage_winner == Player.PLAYER_2
+                and manager.state.stage_wins_player_1 == 0
+                and manager.state.stage_wins_player_2 == 1
+                and manager.state.phase == GamePhase.STAGE_RESULT
+            ),
+        )
+    )(GameManager()),
+)
+check(
+    "Stage tie exposes no winner or stage win",
+    lambda: (
+        lambda manager: (
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            [complete_after(manager, elapsed=10.0) for _ in range(5)],
+            [complete_after(manager, elapsed=10.0) for _ in range(5)],
+            assert_(
+                manager.state.stage_winner is None
+                and manager.state.stage_wins_player_1 == 0
                 and manager.state.stage_wins_player_2 == 0
                 and manager.state.phase == GamePhase.STAGE_RESULT
             ),
@@ -613,18 +952,31 @@ check(
     "Next stage resets stage-specific state",
     lambda: (
         lambda manager: (
-            manager.start_game(Difficulty.EASY),
-            [manager.complete_pattern(pattern()) for _ in range(5)],
-            [manager.complete_pattern(pattern(elapsed=11.0, time_left=19, score=190)) for _ in range(5)],
-            manager.next_stage(),
-            assert_(
-                manager.state.current_stage == 2
-                and manager.state.current_pattern == 1
-                and manager.state.stage_score_player_1 == 0
-                and manager.state.stage_score_player_2 == 0
-                and manager.state.stage_time_player_1 == 0.0
-                and manager.state.stage_time_player_2 == 0.0
-                and manager.state.stage_wins_player_1 == 1
+            manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY),
+            [complete_after(manager, elapsed=10.0) for _ in range(5)],
+            [complete_after(manager, elapsed=11.0) for _ in range(5)],
+            (
+                lambda total_score_p1, total_score_p2: (
+                    manager.next_stage(),
+                    assert_(
+                        manager.state.current_stage == 2
+                        and manager.state.current_pattern == 1
+                        and manager.state.active_player == Player.PLAYER_1
+                        and manager.state.phase == GamePhase.PLAYING
+                        and manager.state.stage_winner is None
+                        and manager.state.stage_score_player_1 == 0
+                        and manager.state.stage_score_player_2 == 0
+                        and manager.state.stage_time_player_1 == 0.0
+                        and manager.state.stage_time_player_2 == 0.0
+                        and manager.state.stage_wins_player_1 == 1
+                        and manager.state.stage_wins_player_2 == 0
+                        and manager.state.score_player_1 == total_score_p1
+                        and manager.state.score_player_2 == total_score_p2
+                    ),
+                )
+            )(
+                manager.state.score_player_1,
+                manager.state.score_player_2,
             ),
         )
     )(GameManager()),
@@ -1018,9 +1370,606 @@ check(
 
 print("\n── vision.pipeline ─────────────────────")
 
+from vision.yolo_detector import CLASS_NAMES, Detection, YoloDetector
+from vision.grid_reconstruction import (
+    GridReconstructor,
+    GridReconstructionResult,
+    map_detection_class,
+)
+from vision.grid_pattern_checker import (
+    GridPatternCheckResult,
+    GridPatternChecker,
+    STATUS_INVALID_RECONSTRUCTION,
+    STATUS_MATCH,
+    STATUS_MISMATCH,
+)
+from vision.pattern_stabilizer import (
+    PatternStabilizationResult,
+    PatternStabilizer,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+    STATUS_STABLE,
+)
 from vision.pipeline import (
     VisionPipeline,
     VisionResult,
+)
+
+
+def test_yolo_detector_adapter():
+    class FakeNet:
+        def __init__(self):
+            self.input = None
+
+        def setInput(self, blob, name):
+            self.input = (blob, name)
+
+        def forward(self, name):
+            assert name == "output0"
+            output = np.zeros((1, 10, 8400), dtype=np.float32)
+            output[0, 0:4, 0] = [320, 320, 200, 100]
+            output[0, 4, 0] = 0.95
+            output[0, 0:4, 1] = [320, 320, 200, 100]
+            output[0, 4, 1] = 0.80
+            output[0, 0:4, 2] = [320, 320, 200, 100]
+            output[0, 5, 2] = 0.90
+            return output
+
+    with patch("vision.yolo_detector.cv2.dnn.readNetFromONNX", return_value=FakeNet()):
+        detector = YoloDetector(
+            model_path="mock.onnx",
+            confidence_threshold=0.25,
+        )
+        detections = detector.detect(np.zeros((640, 640, 3), dtype=np.uint8))
+
+    assert (
+        len(detections) == 2
+        and isinstance(detections[0], Detection)
+        and detections[0].class_id == 0
+        and detections[0].class_name == "red_bottom_right"
+        and abs(detections[0].confidence - 0.95) < 1e-6
+        and detections[0].bbox_xyxy == (220, 270, 420, 370)
+        and detections[1].class_id == 1
+        and detector.net.input[0].shape == (1, 3, 640, 640)
+        and detector.net.input[0].dtype == np.float32
+        and detector.net.input[1] == "images"
+    )
+
+
+def test_yolo_decoder_matches_reference():
+    detector = YoloDetector.__new__(YoloDetector)
+    detector.confidence_threshold = 0.25
+    detector.nms_threshold = 0.45
+    rng = np.random.default_rng(42)
+    output = np.zeros((1, 10, 8400), dtype=np.float32)
+    output[0, :4] = rng.uniform(0, 640, (4, 8400))
+    output[0, 2:4] = rng.uniform(1, 180, (2, 8400))
+    output[0, 4:] = rng.uniform(0, 0.2, (6, 8400))
+
+    cases = [
+        (0.25, 640, 640, 1.0, 0.0, 0.0),
+        (0.5, 1280, 720, 0.5, 0.0, 140.0),
+        (0.9, 300, 900, 0.711, 213.0, 0.0),
+    ]
+    output[0, 0:4, 0:8] = np.array(
+        [
+            [320, 320, 200, 100],
+            [320, 320, 200, 100],
+            [320, 320, 200, 100],
+            [0, 0, 20, 20],
+            [640, 640, 40, 40],
+            [320, 320, 50, 50],
+            [320, 320, 50, 50],
+            [320, 320, 50, 50],
+        ],
+        dtype=np.float32,
+    ).T
+    output[0, 4:, 0:8] = 0.0
+    output[0, 4, 0] = 0.9
+    output[0, 5, 1] = 0.8
+    output[0, 4, 2] = 0.7
+    output[0, 4, 3] = 0.9
+    output[0, 4, 4] = 0.9
+    output[0, 4, 5] = 0.8
+    output[0, 5, 6] = 0.8
+    output[0, 4, 7] = 0.8
+
+    def reference(values, width, height, scale, pad_x, pad_y, threshold):
+        values = values[0].T
+        candidates = []
+        for row in values:
+            class_id = int(np.argmax(row[4:]))
+            confidence = float(row[4 + class_id])
+            if confidence < threshold:
+                continue
+            center_x, center_y, box_width, box_height = map(float, row[:4])
+            box = (
+                max(0, min(width, round(
+                    (center_x - box_width / 2 - pad_x) / scale
+                ))),
+                max(0, min(height, round(
+                    (center_y - box_height / 2 - pad_y) / scale
+                ))),
+                max(0, min(width, round(
+                    (center_x + box_width / 2 - pad_x) / scale
+                ))),
+                max(0, min(height, round(
+                    (center_y + box_height / 2 - pad_y) / scale
+                ))),
+            )
+            if box[2] > box[0] and box[3] > box[1]:
+                candidates.append(
+                    Detection(
+                        class_id=class_id,
+                        class_name=CLASS_NAMES[class_id],
+                        confidence=confidence,
+                        bbox_xyxy=box,
+                    )
+                )
+        return candidates
+
+    for threshold, width, height, scale, pad_x, pad_y in cases:
+        detector.confidence_threshold = threshold
+        actual = detector._decode_output(
+            output,
+            width=width,
+            height=height,
+            scale=scale,
+            pad_x=pad_x,
+            pad_y=pad_y,
+        )
+        expected = reference(
+            output, width, height, scale, pad_x, pad_y, threshold
+        )
+        actual = detector._class_aware_nms(actual)
+        expected = detector._class_aware_nms(expected)
+        assert len(actual) == len(expected)
+        for got, want in zip(actual, expected):
+            assert got.class_id == want.class_id
+            assert got.class_name == want.class_name
+            assert abs(got.confidence - want.confidence) < 1e-6
+            assert np.allclose(got.bbox_xyxy, want.bbox_xyxy, atol=1)
+
+    detector.confidence_threshold = 0.95
+    assert detector._decode_output(
+        output,
+        width=640,
+        height=640,
+        scale=1.0,
+        pad_x=0,
+        pad_y=0,
+    ) == []
+    assert_(_raises(
+        ValueError,
+        lambda: detector.detect(np.zeros((0, 640, 3), dtype=np.uint8)),
+    ))
+
+
+check("YOLO vectorized decoder reference equivalence", test_yolo_decoder_matches_reference)
+
+
+check("YOLO ONNX adapter", test_yolo_detector_adapter)
+
+print("\n── vision.grid_reconstruction ──────────")
+
+
+def test_yolo_class_mapping():
+    expected = {
+        "red_bottom_right": 5,
+        "red_bottom_left": 4,
+        "red_top_right": 3,
+        "red_top_left": 2,
+        "red": 0,
+        "white": 1,
+    }
+    for class_name, pattern_class in expected.items():
+        detection = Detection(
+            class_id={
+                "red_bottom_right": 0,
+                "red_bottom_left": 1,
+                "red_top_right": 2,
+                "red_top_left": 3,
+                "red": 4,
+                "white": 5,
+            }[class_name],
+            class_name=class_name,
+            confidence=0.9,
+            bbox_xyxy=(10, 10, 20, 20),
+        )
+        assert map_detection_class(detection) == pattern_class
+
+
+def test_grid_reconstruction():
+    detections = [
+        Detection(4, "red", 0.9, (10, 10, 40, 40)),
+        Detection(5, "white", 0.9, (60, 10, 90, 40)),
+        Detection(2, "red_top_right", 0.9, (10, 60, 40, 90)),
+        Detection(0, "red_bottom_right", 0.9, (60, 60, 90, 90)),
+    ]
+    result = GridReconstructor((0, 0, 100, 100)).reconstruct(
+        list(reversed(detections)),
+        frame_size=(100, 100),
+    )
+    assert isinstance(result, GridReconstructionResult)
+    assert result.valid
+    assert result.matrix == [[0, 1], [3, 5]]
+
+
+def test_grid_reconstruction_invalid_cases():
+    reconstructor = GridReconstructor((0, 0, 100, 100))
+    valid = Detection(4, "red", 0.9, (10, 10, 40, 40))
+
+    empty = reconstructor.reconstruct([])
+    assert not empty.valid and empty.matrix == [[None, None], [None, None]]
+
+    missing = reconstructor.reconstruct([valid])
+    assert not missing.valid and "missing cell [1][1]" in missing.errors
+
+    duplicate = reconstructor.reconstruct([
+        valid,
+        Detection(5, "white", 0.9, (20, 20, 30, 30)),
+    ])
+    assert not duplicate.valid
+    assert any("multiple detections" in error for error in duplicate.errors)
+
+    outside = reconstructor.reconstruct([
+        Detection(4, "red", 0.9, (120, 120, 130, 130)),
+    ])
+    assert not outside.valid
+    assert "detection outside grid bounds" in outside.errors
+    assert _raises(
+        ValueError,
+        lambda: reconstructor.reconstruct([], frame_size=(80, 100)),
+    )
+    assert _raises(
+        ValueError,
+        lambda: GridReconstructor((-1, 0, 100, 100)),
+    )
+
+    assert _raises(
+        ValueError,
+        lambda: reconstructor.reconstruct([
+            Detection(4, "red", 0.9, (20, 20, 20, 30)),
+        ]),
+    )
+    assert _raises(
+        ValueError,
+        lambda: map_detection_class(
+            Detection(99, "unknown", 0.9, (10, 10, 20, 20))
+        ),
+    )
+
+
+def test_grid_reconstruction_adaptive_geometry():
+    detections = [
+        Detection(0, "red_bottom_right", 0.9, (810, 130, 850, 170)),
+        Detection(4, "red", 0.9, (600, 120, 640, 160)),
+        Detection(5, "white", 0.9, (610, 360, 650, 400)),
+        Detection(2, "red_top_right", 0.9, (820, 370, 860, 410)),
+    ]
+    result = GridReconstructor((42, 100, 300, 250)).reconstruct(
+        detections,
+        frame_size=(1280, 720),
+    )
+    assert result.valid
+    assert result.matrix == [[0, 5], [1, 3]]
+
+    shifted = [
+        Detection(4, "red", 0.9, (605, 125, 650, 170)),
+        Detection(5, "white", 0.9, (815, 130, 860, 175)),
+        Detection(2, "red_top_right", 0.9, (610, 365, 655, 410)),
+        Detection(0, "red_bottom_right", 0.9, (820, 370, 865, 415)),
+    ]
+    shifted_result = GridReconstructor((42, 100, 300, 250)).reconstruct(
+        shifted,
+        frame_size=(1280, 720),
+    )
+    assert shifted_result.valid
+    assert shifted_result.matrix == [[0, 1], [3, 5]]
+
+    extra = detections + [
+        Detection(4, "red", 0.9, (1000, 500, 1040, 540)),
+    ]
+    extra_result = GridReconstructor((42, 100, 300, 250)).reconstruct(
+        extra,
+        frame_size=(1280, 720),
+    )
+    assert extra_result.valid
+    assert extra_result.matrix == [[0, 5], [1, 3]]
+
+    ambiguous = detections + [
+        Detection(5, "white", 0.95, (605, 125, 645, 165)),
+    ]
+    ambiguous_result = GridReconstructor((42, 100, 300, 250)).reconstruct(
+        ambiguous,
+        frame_size=(1280, 720),
+    )
+    assert not ambiguous_result.valid
+    assert _raises(
+        ValueError,
+        lambda: map_detection_class(
+            Detection(0, "red", 0.9, (10, 10, 20, 20))
+        ),
+    )
+
+
+def test_grid_match():
+    from vision.pattern_matcher import PatternMatcher
+
+    detections = [
+        Detection(4, "red", 0.9, (10, 10, 40, 40)),
+        Detection(5, "white", 0.9, (60, 10, 90, 40)),
+        Detection(2, "red_top_right", 0.9, (10, 60, 40, 90)),
+        Detection(0, "red_bottom_right", 0.9, (60, 60, 90, 90)),
+    ]
+    result = GridReconstructor((0, 0, 100, 100)).reconstruct(detections)
+    assert PatternMatcher().match(
+        result.matrix,
+        [[0, 1], [3, 5]],
+    ) == {"accuracy": 1.0, "is_match": True}
+
+
+check("YOLO class mapping", test_yolo_class_mapping)
+check("2x2 grid reconstruction", test_grid_reconstruction)
+check("grid reconstruction invalid cases", test_grid_reconstruction_invalid_cases)
+check(
+    "adaptive grid reconstruction and extra detection rejection",
+    test_grid_reconstruction_adaptive_geometry,
+)
+check("grid reconstruction pattern match", test_grid_match)
+
+print("\n── vision.grid_pattern_checker ─────────")
+
+
+def _checker_detections():
+    return [
+        Detection(4, "red", 0.9, (10, 10, 40, 40)),
+        Detection(5, "white", 0.9, (60, 10, 90, 40)),
+        Detection(2, "red_top_right", 0.9, (10, 60, 40, 90)),
+        Detection(0, "red_bottom_right", 0.9, (60, 60, 90, 90)),
+    ]
+
+
+def test_grid_pattern_checker():
+    checker = GridPatternChecker((0, 0, 100, 100))
+    target = [[0, 1], [3, 5]]
+
+    matched = checker.check(
+        list(reversed(_checker_detections())),
+        target,
+        frame_size=(100, 100),
+    )
+    assert isinstance(matched, GridPatternCheckResult)
+    assert (
+        matched.status == STATUS_MATCH
+        and matched.is_match
+        and matched.detected_pattern == target
+        and matched.accuracy == 1.0
+        and matched.errors == ()
+    )
+
+    mismatched = checker.check(
+        _checker_detections(),
+        [[0, 1], [2, 5]],
+    )
+    assert (
+        mismatched.status == STATUS_MISMATCH
+        and not mismatched.is_match
+        and mismatched.detected_pattern == [[0, 1], [3, 5]]
+        and mismatched.accuracy == 0.75
+    )
+
+
+def test_grid_pattern_checker_invalid_reconstruction():
+    checker = GridPatternChecker((0, 0, 100, 100))
+
+    invalid = checker.check(
+        _checker_detections()[:-1],
+        [[0, 1], [3, 5]],
+    )
+    assert (
+        invalid.status == STATUS_INVALID_RECONSTRUCTION
+        and not invalid.is_match
+        and invalid.accuracy is None
+        and invalid.detected_pattern == [[0, 1], [3, None]]
+        and invalid.errors
+    )
+
+    invalid_detection = checker.check(
+        [Detection(99, "unknown", 0.9, (10, 10, 40, 40))],
+        [[0, 1], [3, 5]],
+    )
+    assert (
+        invalid_detection.status == STATUS_INVALID_RECONSTRUCTION
+        and not invalid_detection.is_match
+        and invalid_detection.accuracy is None
+    )
+
+
+def test_grid_pattern_checker_validates_target():
+    checker = GridPatternChecker((0, 0, 100, 100))
+    detections = _checker_detections()
+
+    assert _raises(
+        ValueError,
+        lambda: checker.check(detections, [[0, 1, 2], [3, 5, 0]]),
+    )
+    assert _raises(
+        ValueError,
+        lambda: checker.check(detections, [[0, 1], [3, 6]]),
+    )
+    assert _raises(
+        TypeError,
+        lambda: checker.check(detections, None),
+    )
+
+
+def test_grid_pattern_checker_matches_pattern_matcher():
+    from vision.pattern_matcher import PatternMatcher
+
+    checker = GridPatternChecker((0, 0, 100, 100))
+    target = [[0, 1], [3, 5]]
+    result = checker.check(_checker_detections(), target)
+    expected = PatternMatcher().match(result.detected_pattern, target)
+    assert result.accuracy == expected["accuracy"]
+    assert result.is_match == expected["is_match"]
+
+
+check("grid pattern checker match and mismatch", test_grid_pattern_checker)
+check(
+    "grid pattern checker invalid reconstruction",
+    test_grid_pattern_checker_invalid_reconstruction,
+)
+check(
+    "grid pattern checker target validation",
+    test_grid_pattern_checker_validates_target,
+)
+check(
+    "grid pattern checker uses PatternMatcher",
+    test_grid_pattern_checker_matches_pattern_matcher,
+)
+
+print("\n── vision.pattern_stabilizer ───────────")
+
+
+def _stable_match_result(matrix=None):
+    if matrix is None:
+        matrix = [[0, 1], [3, 5]]
+    return GridPatternCheckResult(
+        status=STATUS_MATCH,
+        detected_pattern=matrix,
+        accuracy=1.0,
+        is_match=True,
+    )
+
+
+def _stable_mismatch_result():
+    return GridPatternCheckResult(
+        status=STATUS_MISMATCH,
+        detected_pattern=[[0, 1], [3, 5]],
+        accuracy=0.75,
+        is_match=False,
+    )
+
+
+def _stable_invalid_result():
+    return GridPatternCheckResult(
+        status=STATUS_INVALID_RECONSTRUCTION,
+        detected_pattern=[[0, 1], [3, None]],
+        accuracy=None,
+        is_match=False,
+        errors=("missing cell [1][1]",),
+    )
+
+
+def test_pattern_stabilizer_sequence():
+    stabilizer = PatternStabilizer()
+    target = [[0, 1], [3, 5]]
+
+    first = stabilizer.update(_stable_match_result(), target)
+    second = stabilizer.update(_stable_match_result(), target)
+    third = stabilizer.update(_stable_match_result(), target)
+    fourth = stabilizer.update(_stable_match_result(), target)
+
+    assert (
+        isinstance(first, PatternStabilizationResult)
+        and first.status == STATUS_PENDING
+        and not first.success
+        and first.consecutive_matches == 1
+        and second.consecutive_matches == 2
+        and third.status == STATUS_STABLE
+        and third.success
+        and third.consecutive_matches == 3
+        and fourth.status == STATUS_STABLE
+        and not fourth.success
+        and fourth.consecutive_matches == 4
+    )
+
+
+def test_pattern_stabilizer_resets_on_nonmatch_and_matrix_change():
+    stabilizer = PatternStabilizer()
+    target = [[0, 1], [3, 5]]
+    stabilizer.update(_stable_match_result(), target)
+    stabilizer.update(_stable_match_result(), target)
+
+    mismatch = stabilizer.update(_stable_mismatch_result(), target)
+    invalid = stabilizer.update(_stable_invalid_result(), target)
+    changed = stabilizer.update(
+        _stable_match_result([[0, 1], [5, 3]]),
+        target,
+    )
+    assert (
+        mismatch.status == STATUS_REJECTED
+        and mismatch.consecutive_matches == 0
+        and invalid.status == STATUS_REJECTED
+        and invalid.consecutive_matches == 0
+        and changed.status == STATUS_PENDING
+        and changed.consecutive_matches == 1
+        and not changed.success
+    )
+
+
+def test_pattern_stabilizer_target_change_and_explicit_reset():
+    stabilizer = PatternStabilizer(minimum_matches=2)
+    target_one = [[0, 1], [3, 5]]
+    target_two = [[1, 0], [5, 3]]
+
+    stabilizer.update(_stable_match_result(), target_one)
+    stable_one = stabilizer.update(_stable_match_result(), target_one)
+    changed_target = stabilizer.update(
+        _stable_match_result([[1, 0], [5, 3]]),
+        target_two,
+    )
+    assert stable_one.success
+    assert (
+        changed_target.status == STATUS_PENDING
+        and changed_target.consecutive_matches == 1
+        and not changed_target.success
+    )
+
+    stabilizer.reset()
+    reset_first = stabilizer.update(
+        _stable_match_result([[1, 0], [5, 3]]),
+        target_two,
+    )
+    reset_second = stabilizer.update(
+        _stable_match_result([[1, 0], [5, 3]]),
+        target_two,
+    )
+    assert not reset_first.success and reset_second.success
+
+
+def test_pattern_stabilizer_validates_threshold_and_results():
+    assert _raises(ValueError, lambda: PatternStabilizer(0))
+    assert _raises(ValueError, lambda: PatternStabilizer(-1))
+    assert _raises(TypeError, lambda: PatternStabilizer(3.0))
+
+    stabilizer = PatternStabilizer()
+    assert _raises(
+        TypeError,
+        lambda: stabilizer.update(object(), [[0, 1], [3, 5]]),
+    )
+    assert _raises(
+        ValueError,
+        lambda: stabilizer.update(
+            _stable_match_result(),
+            [[0, 1, 2], [3, 5, 0]],
+        ),
+    )
+
+
+check("pattern stabilizer consecutive matches", test_pattern_stabilizer_sequence)
+check(
+    "pattern stabilizer nonmatch and matrix reset",
+    test_pattern_stabilizer_resets_on_nonmatch_and_matrix_change,
+)
+check(
+    "pattern stabilizer target and explicit reset",
+    test_pattern_stabilizer_target_change_and_explicit_reset,
+)
+check(
+    "pattern stabilizer validation",
+    test_pattern_stabilizer_validates_threshold_and_results,
 )
 
 
@@ -1599,6 +2548,18 @@ check(
 
 print("\n── ui.widgets.camera_widget ─────────────")
 from ui.widgets.camera_widget import CameraWidget
+from ui.workers.camera_worker import (
+    CameraWorker,
+    VISION_ERROR,
+    VISION_GEOMETRY_UNCONFIGURED,
+    VISION_INVALID_RECONSTRUCTION,
+    VISION_PENDING,
+    VISION_STABLE,
+    VISION_TARGET_UNAVAILABLE,
+    VisionFrameResult,
+)
+from vision.yolo_detector import Detection
+from PyQt5.QtCore import Qt
 
 
 def test_camera_widget():
@@ -1664,6 +2625,266 @@ def test_camera_widget():
 
 
 check("camera widget", test_camera_widget)
+
+
+def test_camera_worker_failure():
+    class UnavailableCamera:
+        def __init__(self):
+            self.released = False
+
+        def open(self):
+            return False
+
+        def release(self):
+            self.released = True
+
+    with patch("ui.workers.camera_worker.Camera", UnavailableCamera):
+        worker = CameraWorker()
+        statuses = []
+        worker.status_changed.connect(
+            lambda status, detail: statuses.append((status, detail)),
+            Qt.DirectConnection,
+        )
+        worker.start()
+        assert worker.wait(2000)
+
+    assert statuses and statuses[0][0] == "error"
+
+
+def test_camera_worker_frame_delivery():
+    class FakeCamera:
+        instances = []
+
+        def __init__(self):
+            self.released = False
+            FakeCamera.instances.append(self)
+
+        def open(self):
+            return True
+
+        def read(self):
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+        def release(self):
+            self.released = True
+
+    with patch("ui.workers.camera_worker.Camera", FakeCamera):
+        worker = CameraWorker()
+        frames = []
+
+        def receive(frame):
+            frames.append(frame)
+            worker.stop()
+
+        worker.frame_ready.connect(receive, Qt.DirectConnection)
+        worker.start()
+        assert worker.wait(2000)
+
+    assert (
+        len(frames) == 1
+        and frames[0].shape == (2, 2, 3)
+        and FakeCamera.instances[0].released
+    )
+
+
+def test_camera_worker_yolo_overlay():
+    class FakeCamera:
+        instances = []
+
+        def __init__(self):
+            self.released = False
+            self.read_count = 0
+            FakeCamera.instances.append(self)
+
+        def open(self):
+            return True
+
+        def read(self):
+            self.read_count += 1
+            frame = np.zeros((80, 120, 3), dtype=np.uint8)
+            time.sleep(0.01)
+            if self.read_count >= 20:
+                worker.stop()
+            return frame
+
+        def release(self):
+            self.released = True
+
+    class FakeDetection:
+        class_name = "red"
+        confidence = 0.9
+        bbox_xyxy = (10, 20, 50, 60)
+
+    class FakeDetector:
+        instances = []
+
+        def __init__(self):
+            self.calls = 0
+            FakeDetector.instances.append(self)
+
+        def detect(self, frame):
+            self.calls += 1
+            return [FakeDetection()]
+
+    with patch("ui.workers.camera_worker.Camera", FakeCamera):
+        worker = CameraWorker(detector_factory=FakeDetector)
+        frames = []
+        worker.frame_ready.connect(
+            lambda frame: frames.append(frame),
+            Qt.DirectConnection,
+        )
+        worker.start()
+        assert worker.wait(2000)
+
+    assert FakeCamera.instances[0].released
+    assert FakeDetector.instances[0].calls >= 1
+    assert any(np.any(frame[:, :, 1] > 0) for frame in frames)
+
+
+def test_camera_worker_vision_pipeline():
+    target = [[0, 1], [3, 5]]
+    detections = [
+        Detection(4, "red", 0.9, (10, 10, 40, 40)),
+        Detection(5, "white", 0.9, (60, 10, 90, 40)),
+        Detection(2, "red_top_right", 0.9, (10, 60, 40, 90)),
+        Detection(0, "red_bottom_right", 0.9, (60, 60, 90, 90)),
+    ]
+
+    worker = CameraWorker(grid_bounds=(0, 0, 100, 100))
+    target_missing = worker._process_vision_result(
+        1,
+        detections,
+        (100, 100),
+    )
+    assert target_missing.status == VISION_TARGET_UNAVAILABLE
+
+    worker.set_vision_target(target)
+    geometry_worker = CameraWorker()
+    geometry_worker.set_vision_target(target)
+    geometry_missing = geometry_worker._process_vision_result(
+        1,
+        detections,
+        (100, 100),
+    )
+    assert geometry_missing.status == VISION_GEOMETRY_UNCONFIGURED
+
+    results = [
+        worker._process_vision_result(frame_id, detections, (100, 100))
+        for frame_id in (1, 2, 3)
+    ]
+    assert (
+        [item.status for item in results]
+        == [VISION_PENDING, VISION_PENDING, VISION_STABLE]
+        and results[-1].stabilization.success
+    )
+    assert worker._process_vision_result(
+        4,
+        [],
+        (100, 100),
+    ).status == VISION_INVALID_RECONSTRUCTION
+
+    worker.set_vision_target([[1, 0], [5, 3]])
+    reset_result = worker._process_vision_result(
+        5,
+        detections,
+        (100, 100),
+    )
+    assert reset_result.status == "mismatch"
+
+
+def test_camera_worker_frame_id_deduplication_and_errors():
+    from queue import Queue
+
+    class FakeDetector:
+        def detect(self, frame):
+            return []
+
+    worker = CameraWorker(grid_bounds=(0, 0, 100, 100))
+    worker.set_vision_target([[0, 1], [3, 5]])
+    results = []
+    worker.vision_result.connect(
+        lambda result: results.append(result),
+        Qt.DirectConnection,
+    )
+    worker._inference_queue = Queue()
+    worker._inference_queue.put((7, np.zeros((10, 10, 3), dtype=np.uint8)))
+    worker._inference_queue.put((7, np.zeros((10, 10, 3), dtype=np.uint8)))
+    worker._stop_event.set()
+    worker._inference_loop(FakeDetector())
+    assert len(results) == 1 and results[0].frame_id == 7
+
+    class FailingDetector:
+        def detect(self, frame):
+            raise RuntimeError("synthetic inference failure")
+
+    failing_worker = CameraWorker()
+    failures = []
+    failing_worker.vision_result.connect(
+        lambda result: failures.append(result),
+        Qt.DirectConnection,
+    )
+    failing_worker._inference_queue.put(
+        (1, np.zeros((10, 10, 3), dtype=np.uint8))
+    )
+    failing_worker._stop_event.set()
+    failing_worker._inference_loop(FailingDetector())
+    assert len(failures) == 1 and failures[0].status == VISION_ERROR
+
+
+check("camera worker failure", test_camera_worker_failure)
+check("camera worker frame delivery", test_camera_worker_frame_delivery)
+check("camera worker YOLO overlay", test_camera_worker_yolo_overlay)
+check("camera worker vision pipeline", test_camera_worker_vision_pipeline)
+check(
+    "camera worker frame identity and errors",
+    test_camera_worker_frame_id_deduplication_and_errors,
+)
+
+
+def test_camera_worker_raw_frame_snapshot():
+    with tempfile.TemporaryDirectory() as directory:
+        worker = CameraWorker(raw_frame_snapshot_dir=directory)
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        assert not worker._save_raw_frame(16, frame)
+        assert worker._raw_frame_snapshot_path is None
+
+        frame[100:200, 100:200] = (10, 80, 200)
+        assert worker._save_raw_frame(17, frame)
+        first_path = worker._raw_frame_snapshot_path
+        worker._save_raw_frame(18, frame)
+
+        assert first_path is not None
+        saved = cv2.imread(str(first_path))
+        assert saved is not None and saved.shape == (720, 1280, 3)
+        assert worker._raw_frame_snapshot_path == first_path
+
+
+check(
+    "camera worker raw frame snapshot",
+    test_camera_worker_raw_frame_snapshot,
+)
+
+
+def test_camera_worker_raw_frame_snapshot_retries_write_failure():
+    with tempfile.TemporaryDirectory() as directory:
+        worker = CameraWorker(raw_frame_snapshot_dir=directory)
+        frame = np.full((20, 30, 3), 80, dtype=np.uint8)
+        original_imwrite = cv2.imwrite
+        try:
+            cv2.imwrite = lambda path, value: False
+            assert not worker._save_raw_frame(1, frame)
+            assert worker._raw_frame_snapshot_path is None
+            cv2.imwrite = original_imwrite
+            assert worker._save_raw_frame(2, frame)
+        finally:
+            cv2.imwrite = original_imwrite
+        assert worker._raw_frame_snapshot_path is not None
+
+
+check(
+    "camera worker raw frame snapshot write retry",
+    test_camera_worker_raw_frame_snapshot_retries_write_failure,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ui.widgets.score_widget
@@ -1834,6 +3055,433 @@ def test_timer_widget():
 check("timer widget", test_timer_widget)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ui.main_window
+# ─────────────────────────────────────────────────────────────────────────────
+
+print("\n── ui.main_window ───────────────────────")
+
+from ui.main_window import MainWindow
+
+
+def test_main_window():
+    window = MainWindow()
+
+    assert window.game_manager is not None
+    assert window.lobby_screen is not None
+    assert window.game_screen is not None
+    assert window.stage_result_screen is not None
+    assert window.game_result_screen is not None
+    assert window.stack.currentWidget() is window.lobby_screen
+
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+    assert window.stack.currentWidget() is window.game_screen
+
+    window.show_stage_result()
+    assert window.stack.currentWidget() is window.stage_result_screen
+
+    window.game_manager.state.phase = GamePhase.STAGE_RESULT
+    window.stage_result_screen.next_button.click()
+    assert (
+        window.stack.currentWidget() is window.game_screen
+        and window.game_manager.state.phase == GamePhase.PLAYING
+    )
+
+    window.game_manager.state.phase = GamePhase.GAME_RESULT
+    window.stage_result_screen.next_button.click()
+    assert window.stack.currentWidget() is window.game_result_screen
+
+    window.game_result_screen.rematch_button.click()
+    assert window.stack.currentWidget() is window.lobby_screen
+
+    window.close()
+
+
+def test_main_window_runtime_start():
+    configurations = (
+        (GridSize.TWO_BY_TWO, Difficulty.EASY, 30),
+        (GridSize.TWO_BY_TWO, Difficulty.NORMAL, 25),
+        (GridSize.TWO_BY_TWO, Difficulty.HARD, 20),
+    )
+
+    for grid_size, difficulty, seconds in configurations:
+        window = MainWindow()
+        window._on_lobby_start(grid_size, difficulty)
+
+        assert window.stack.currentWidget() is window.game_screen
+        assert window.game_manager.state.grid_size == grid_size
+        assert window.game_manager.state.difficulty == difficulty
+        assert window.game_manager.state.phase == GamePhase.PLAYING
+        assert window.game_manager.state.current_stage == 1
+        assert window.game_manager.state.current_pattern == 1
+        assert window.game_manager.timer.running
+        assert window.game_manager.state.pattern_progress_player_1 == 0
+        assert window.game_manager.state.pattern_progress_player_2 == 0
+        assert window.game_manager.state.score_player_1 == 0
+        assert window.game_manager.state.score_player_2 == 0
+        assert not window.game_screen.is_resolved
+        assert window.game_screen.remaining_seconds == seconds
+        assert len(window.game_screen.pattern_grid.grid) == 2
+        assert all(
+            len(row) == 2
+            for row in window.game_screen.pattern_grid.grid
+        )
+        assert window.stage_result_screen is not window.stack.currentWidget()
+        assert window.game_result_screen is not window.stack.currentWidget()
+
+        window.game_manager.timer.stop()
+        window.close()
+
+
+def test_main_window_rejects_unsupported_grid():
+    window = MainWindow()
+
+    assert _raises(
+        NotImplementedError,
+        lambda: window._on_lobby_start(
+            GridSize.THREE_BY_THREE,
+            Difficulty.EASY,
+        ),
+    )
+    assert window.stack.currentWidget() is window.lobby_screen
+    assert window.game_manager.state.phase == GamePhase.LOBBY
+    assert not window.game_manager.timer.running
+
+    window.close()
+
+
+check("main window", test_main_window)
+
+
+def test_main_window_pattern_completion():
+    window = MainWindow()
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+
+    initial_pattern = window.game_manager.get_current_pattern()
+    initial_score = window.game_manager.state.score_player_1
+
+    window._on_game_done(correct=False, accuracy=0.25)
+    assert (
+        window.game_manager.get_current_pattern() == initial_pattern
+        and window.game_manager.state.score_player_1 == initial_score
+        and window.game_manager.timer.running
+        and not window.game_screen.is_resolved
+    )
+
+    received = []
+    original_complete = window.game_manager.complete_pattern
+
+    def capture_completion(correct, accuracy):
+        received.append((correct, accuracy))
+        return original_complete(correct, accuracy)
+
+    window.game_manager.complete_pattern = capture_completion
+    window._on_game_done(correct=True, accuracy=0.875)
+
+    assert received == [(True, 0.875)]
+    assert window.game_manager.state.current_pattern == 2
+    assert window.game_manager.state.pattern_progress_player_1 == 1
+    assert window.game_manager.state.score_player_1 > 0
+    assert window.game_manager.timer.running
+    assert window.game_screen.pattern_count_label.text() == "2 / 15"
+    assert window.game_screen.remaining_seconds == 30
+    assert not window.game_screen.is_resolved
+    assert window.stack.currentWidget() is window.game_screen
+
+    window.game_manager.timer.stop()
+    window.close()
+
+
+check(
+    "main window pattern completion",
+    test_main_window_pattern_completion,
+)
+
+
+def test_main_window_vision_integration_contract():
+    window = MainWindow()
+    window.game_manager.start_game(GridSize.TWO_BY_TWO, Difficulty.EASY)
+    window.game_manager.start_pattern()
+    target = window.game_manager.get_current_pattern_grid()
+    window._vision_target_generation = 1
+
+    worker = CameraWorker(grid_bounds=(0, 0, 100, 100))
+    worker.set_vision_target(target)
+    class_by_pattern = {
+        0: (4, "red"),
+        1: (5, "white"),
+        2: (3, "red_top_left"),
+        3: (2, "red_top_right"),
+        4: (1, "red_bottom_left"),
+        5: (0, "red_bottom_right"),
+    }
+    detections = []
+    for row, values in enumerate(target):
+        for column, pattern_class in enumerate(values):
+            class_id, class_name = class_by_pattern[pattern_class]
+            x1 = 10 + column * 50
+            y1 = 10 + row * 50
+            detections.append(
+                Detection(
+                    class_id,
+                    class_name,
+                    0.9,
+                    (x1, y1, x1 + 30, y1 + 30),
+                )
+            )
+    results = [
+        worker._process_vision_result(frame_id, detections, (100, 100))
+        for frame_id in (1, 2, 3)
+    ]
+    stable = results[-1]
+    assert stable.status == VISION_STABLE
+    received = []
+    original_complete = window.game_manager.complete_pattern
+
+    def capture_completion(correct, accuracy):
+        received.append((correct, accuracy))
+        return original_complete(correct, accuracy)
+
+    window.game_manager.complete_pattern = capture_completion
+    window._on_vision_result(stable)
+    assert received == [(True, 1.0)]
+    assert window._accepted_vision_accuracy == 1.0
+    assert window.game_manager.state.current_pattern == 2
+    assert window.game_manager.state.pattern_progress_player_1 == 1
+
+    # The old stable result must not complete the next pattern.
+    window._on_vision_result(stable)
+    assert received == [(True, 1.0)]
+    assert window.game_manager.state.current_pattern == 2
+
+    for status in (
+        VISION_PENDING,
+        "mismatch",
+        VISION_INVALID_RECONSTRUCTION,
+        VISION_ERROR,
+    ):
+        rejected = VisionFrameResult(
+            frame_id=10,
+            status=status,
+            stabilization=stable.stabilization,
+            target_pattern=target,
+            target_generation=1,
+        )
+        assert not window._accept_vision_result(rejected)
+
+    stale = VisionFrameResult(
+        frame_id=11,
+        status=VISION_STABLE,
+        stabilization=stable.stabilization,
+        target_pattern=target,
+        target_generation=0,
+    )
+    assert not window._accept_vision_result(stale)
+
+    old_target = VisionFrameResult(
+        frame_id=12,
+        status=VISION_STABLE,
+        stabilization=stable.stabilization,
+        target_pattern=[[1, 0], [1, 1]],
+        target_generation=2,
+    )
+    assert not window._accept_vision_result(old_target)
+
+    window.game_manager.state.phase = GamePhase.STAGE_RESULT
+    assert not window._accept_vision_result(stable)
+    window.game_manager.state.phase = GamePhase.PLAYING
+    window.game_manager.timer.stop()
+    assert not window._accept_vision_result(stable)
+    window.close()
+
+
+check(
+    "main window vision integration contract",
+    test_main_window_vision_integration_contract,
+)
+
+
+def test_main_window_timer_refresh():
+    window = MainWindow()
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+
+    start_time = window.game_manager.timer.start_time
+    with patch(
+        "game.timer.time.monotonic",
+        return_value=start_time + 1.25,
+    ):
+        window._refresh_timer_display()
+
+    assert (
+        window.game_screen.remaining_seconds == 29
+        and window.game_manager.timer.running
+        and window.timer_refresh.isActive()
+    )
+
+    window.timer_refresh.stop()
+    window.close()
+
+
+def test_main_window_timeout_refresh():
+    window = MainWindow()
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+    timeout_calls = []
+    original_timeout = window.game_manager.timeout_pattern
+
+    def capture_timeout():
+        timeout_calls.append(True)
+        return original_timeout()
+
+    window.game_manager.timeout_pattern = capture_timeout
+    start_time = window.game_manager.timer.start_time
+    with patch(
+        "game.timer.time.monotonic",
+        return_value=start_time + window.game_manager.timer.time_limit,
+    ):
+        window._refresh_timer_display()
+        window._refresh_timer_display()
+
+    assert (
+        timeout_calls == [True]
+        and window.game_screen.remaining_seconds == 30
+        and window.game_manager.state.pattern_progress_player_1 == 1
+        and window.game_manager.state.current_pattern == 2
+        and window.game_manager.timer.running
+        and window.timer_refresh.isActive()
+    )
+
+    window.timer_refresh.stop()
+    window.close()
+
+
+check("main window timer refresh", test_main_window_timer_refresh)
+check("main window timeout refresh", test_main_window_timeout_refresh)
+
+
+def test_main_window_stage_result_wiring():
+    window = MainWindow()
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+
+    def complete_window_pattern(elapsed):
+        window.game_manager.start_pattern()
+        start_time = window.game_manager.timer.start_time
+        with patch(
+            "game.timer.time.monotonic",
+            return_value=start_time + elapsed,
+        ):
+            window._on_game_done(correct=True, accuracy=1.0)
+
+    for elapsed in (10.0,) * 5:
+        complete_window_pattern(elapsed)
+    for elapsed in (11.0,) * 5:
+        complete_window_pattern(elapsed)
+
+    state = window.game_manager.state
+    assert (
+        state.phase == GamePhase.STAGE_RESULT
+        and state.pattern_progress_player_1 == 5
+        and state.pattern_progress_player_2 == 5
+        and state.current_stage == 1
+        and state.stage_winner == Player.PLAYER_1
+        and state.stage_wins_player_1 == 1
+        and state.stage_wins_player_2 == 0
+        and state.stage_score_player_1 == 1000
+        and state.stage_score_player_2 == 950
+        and window.stack.currentWidget() is window.stage_result_screen
+        and "Player 1" in window.stage_result_screen.winner_label.text()
+        and "1000" in window.stage_result_screen.scores_label.text()
+    )
+
+    window.stage_result_screen.next_button.click()
+    assert (
+        state.phase == GamePhase.PLAYING
+        and state.current_stage == 2
+        and state.current_pattern == 1
+        and state.active_player == Player.PLAYER_1
+        and state.stage_winner is None
+        and state.stage_wins_player_1 == 1
+        and state.stage_wins_player_2 == 0
+        and state.score_player_1 == 1000
+        and state.score_player_2 == 950
+        and state.stage_score_player_1 == 0
+        and state.stage_score_player_2 == 0
+        and state.stage_time_player_1 == 0.0
+        and state.stage_time_player_2 == 0.0
+        and window.game_screen.stage_label.text() == "Stage 2 — Pattern 1/5"
+        and window.game_screen.pattern_count_label.text() == "6 / 15"
+        and window.game_manager.timer.running
+    )
+
+    window.game_manager.timer.stop()
+    window.close()
+
+
+check("main window stage result wiring", test_main_window_stage_result_wiring)
+
+
+def test_main_window_stage_progression_and_game_result():
+    window = MainWindow()
+    window._on_lobby_start(GridSize.TWO_BY_TWO, Difficulty.EASY)
+
+    def complete_player(elapsed):
+        for _ in range(5):
+            window.game_manager.start_pattern()
+            start_time = window.game_manager.timer.start_time
+            with patch(
+                "game.timer.time.monotonic",
+                return_value=start_time + elapsed,
+            ):
+                window._on_game_done(correct=True, accuracy=1.0)
+
+    complete_player(10.0)
+    complete_player(11.0)
+    window.stage_result_screen.next_button.click()
+    complete_player(11.0)
+    complete_player(10.0)
+
+    state = window.game_manager.state
+    assert (
+        state.current_stage == 2
+        and state.stage_winner == Player.PLAYER_2
+        and state.stage_wins_player_1 == 1
+        and state.stage_wins_player_2 == 1
+        and window.stack.currentWidget() is window.stage_result_screen
+        and "Player 2" in window.stage_result_screen.winner_label.text()
+        and "Stage 2" == window.stage_result_screen.stage_label.text()
+    )
+
+    window.stage_result_screen.next_button.click()
+    assert (
+        state.current_stage == 3
+        and state.current_pattern == 1
+        and state.active_player == Player.PLAYER_1
+        and state.phase == GamePhase.PLAYING
+        and state.stage_wins_player_1 == 1
+        and state.stage_wins_player_2 == 1
+        and window.game_screen.stage_label.text() == "Stage 3 — Pattern 1/5"
+    )
+
+    complete_player(10.0)
+    complete_player(11.0)
+    assert (
+        state.phase == GamePhase.GAME_RESULT
+        and window.stack.currentWidget() is window.game_result_screen
+    )
+
+    window.game_manager.timer.stop()
+    window.close()
+
+
+check(
+    "main window stage progression and game result",
+    test_main_window_stage_progression_and_game_result,
+)
+check("main window runtime start", test_main_window_runtime_start)
+check(
+    "main window rejects unsupported grid",
+    test_main_window_rejects_unsupported_grid,
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ui.screens.lobby_screen
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1845,7 +3493,11 @@ from ui.screens.lobby_screen import LobbyScreen
 def test_lobby_screen():
     started = []
 
-    widget = LobbyScreen(on_start=lambda: started.append(True))
+    widget = LobbyScreen(
+        on_start=lambda grid_size, difficulty: started.append(
+            (grid_size, difficulty)
+        )
+    )
 
     # Initial state
     assert widget.start_button.isEnabled()
@@ -1853,6 +3505,31 @@ def test_lobby_screen():
     assert "Menunggu" in widget._player_labels[1].text()
     assert "Player 2" in widget._player_labels[2].text()
     assert "Menunggu" in widget._player_labels[2].text()
+    assert (
+        widget.selected_grid_size()
+        == __import__("core.enums", fromlist=["GridSize"]).GridSize.TWO_BY_TWO
+    )
+    assert (
+        widget.selected_difficulty()
+        == __import__("core.enums", fromlist=["Difficulty"]).Difficulty.EASY
+    )
+
+    widget.set_grid_size(
+        __import__("core.enums", fromlist=["GridSize"])
+        .GridSize.THREE_BY_THREE
+    )
+    widget.set_difficulty(
+        __import__("core.enums", fromlist=["Difficulty"])
+        .Difficulty.HARD
+    )
+    assert (
+        widget.selected_grid_size()
+        == __import__("core.enums", fromlist=["GridSize"]).GridSize.THREE_BY_THREE
+    )
+    assert (
+        widget.selected_difficulty()
+        == __import__("core.enums", fromlist=["Difficulty"]).Difficulty.HARD
+    )
 
     # Player status updates
     widget.set_player_status(1, "ready")
@@ -1873,7 +3550,14 @@ def test_lobby_screen():
     widget.set_start_enabled(True)
     assert widget.start_button.isEnabled()
     widget.start_button.click()
-    assert started == [True]
+    assert started == [
+        (
+            __import__("core.enums", fromlist=["GridSize"])
+            .GridSize.THREE_BY_THREE,
+            __import__("core.enums", fromlist=["Difficulty"])
+            .Difficulty.HARD,
+        )
+    ]
 
     # Reject invalid player IDs, statuses, and messages
     assert _raises_value_error(
@@ -1885,6 +3569,15 @@ def test_lobby_screen():
     assert _raises(
         TypeError,
         lambda: widget.set_player_status(1, "ready", 123)
+    )
+
+    assert _raises(
+        TypeError,
+        lambda: widget.set_grid_size(2),
+    )
+    assert _raises(
+        TypeError,
+        lambda: widget.set_difficulty("easy"),
     )
 
     widget.close()
@@ -1910,7 +3603,8 @@ def test_game_screen():
 
     # Initial state
     assert widget.remaining_seconds == 30
-    assert not widget.is_running
+    assert widget.is_resolved
+    assert not hasattr(widget, "_timer")
     assert widget.time_bar.value() == 30
     assert widget.player1_score_label.text().endswith("0")
     assert widget.player2_score_label.text().endswith("0")
@@ -1929,13 +3623,19 @@ def test_game_screen():
         seconds=20,
     )
 
-    assert widget.is_running
+    assert not widget.is_resolved
     assert widget.remaining_seconds == 20
     assert widget.time_bar.maximum() == 20
     assert widget.time_bar.value() == 20
     assert "Stage 1" in widget.stage_label.text()
     assert "Pattern 2/5" in widget.stage_label.text()
     assert widget.pattern_count_label.text() == "2 / 15"
+
+    # The controller supplies timer display updates; the screen does not tick.
+    widget.set_time_remaining(17)
+    assert widget.remaining_seconds == 17
+    assert widget.timer_label.text().endswith("17s")
+    assert widget.time_bar.value() == 17
 
     # Update scores and progress
     widget.set_scores(120, 95)
@@ -1946,23 +3646,41 @@ def test_game_screen():
     assert widget.artwork_count_label.text() == "3 / 15"
     assert widget.pattern_count_label.text() == "4 / 15"
 
-    # Receive detection result
+    # A mismatch updates presentation and leaves scanning active.
+    widget.receive_detection(
+        correct=False,
+        accuracy=0.5,
+    )
+    assert not widget.is_resolved
+    assert "NOT MATCHED" in widget.detection_label.text()
+    assert "50.0%" in widget.detection_label.text()
+    assert completed == []
+
+    # A match resolves the pattern and reports normalized accuracy.
     widget.receive_detection(
         correct=True,
-        accuracy=98.5,
+        accuracy=0.985,
     )
-
-    assert not widget.is_running
+    assert widget.is_resolved
     assert "MATCHED" in widget.detection_label.text()
     assert completed == [
-        {"correct": True, "time_left": 20}
+        {"correct": True, "accuracy": 0.985}
     ]
 
     # Ignore duplicate detection
     widget.receive_detection(
         correct=False,
-        accuracy=50.0,
+        accuracy=0.5,
     )
+    assert len(completed) == 1
+
+    # A controller-reported timeout is presentation only.
+    widget.start(1, 2, 2, grid, 20)
+    widget.show_timeout()
+    assert widget.is_resolved
+    assert widget.remaining_seconds == 0
+    assert widget.time_bar.value() == 0
+    assert "TIMEOUT" in widget.detection_label.text()
     assert len(completed) == 1
 
     # Reject invalid inputs
@@ -1977,10 +3695,13 @@ def test_game_screen():
     )
     assert _raises(
         TypeError,
-        lambda: widget.receive_detection("yes", 95.0)
+        lambda: widget.receive_detection("yes", 0.95)
     )
     assert _raises_value_error(
-        lambda: widget.receive_detection(True, 101)
+        lambda: widget.receive_detection(True, 1.01)
+    )
+    assert _raises_value_error(
+        lambda: widget.set_time_remaining(-1)
     )
     assert _raises_value_error(
         lambda: widget.set_scores(-1, 10)

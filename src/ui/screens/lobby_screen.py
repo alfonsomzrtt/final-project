@@ -3,13 +3,17 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
+    QComboBox,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+from core.enums import Difficulty, GridSize
 
 
 BG_DARK = "#0D1B2A"
@@ -31,6 +35,7 @@ class LobbyScreen(QWidget):
     def __init__(self, on_start):
         super().__init__()
 
+        self._on_start = on_start
         self._player_labels = {}
 
         self.setObjectName("LobbyScreen")
@@ -97,6 +102,65 @@ class LobbyScreen(QWidget):
 
         root.addWidget(player_card)
 
+        config_card = QFrame()
+        config_card.setObjectName("ConfigCard")
+        config_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        config_card.setStyleSheet(
+            f"""
+            QFrame#ConfigCard {{
+                background: {BG_CARD};
+                border: none;
+                border-radius: 8px;
+            }}
+            """
+        )
+
+        config_layout = QVBoxLayout(config_card)
+        config_layout.setContentsMargins(18, 14, 18, 14)
+        config_layout.setSpacing(10)
+
+        config_heading = QLabel("KONFIGURASI PERMAINAN")
+        config_heading.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        config_heading.setStyleSheet(
+            f"color: {TEXT_DIM}; background: transparent;"
+        )
+        config_layout.addWidget(config_heading)
+
+        self.grid_size_combo = QComboBox()
+        self.grid_size_combo.addItem("2x2", GridSize.TWO_BY_TWO)
+        self.grid_size_combo.addItem("3x3", GridSize.THREE_BY_THREE)
+
+        self.difficulty_combo = QComboBox()
+        self.difficulty_combo.addItem("Easy", Difficulty.EASY)
+        self.difficulty_combo.addItem("Normal", Difficulty.NORMAL)
+        self.difficulty_combo.addItem("Hard", Difficulty.HARD)
+
+        grid_row = QHBoxLayout()
+        grid_row.setContentsMargins(0, 0, 0, 0)
+        grid_row.setSpacing(12)
+
+        grid_label = QLabel("Grid Size")
+        grid_label.setFont(QFont("Segoe UI", 10))
+        grid_label.setStyleSheet(f"color: {TEXT_MAIN}; background: transparent;")
+        grid_row.addWidget(grid_label)
+        grid_row.addWidget(self.grid_size_combo, stretch=1)
+        config_layout.addLayout(grid_row)
+
+        difficulty_row = QHBoxLayout()
+        difficulty_row.setContentsMargins(0, 0, 0, 0)
+        difficulty_row.setSpacing(12)
+
+        difficulty_label = QLabel("Difficulty")
+        difficulty_label.setFont(QFont("Segoe UI", 10))
+        difficulty_label.setStyleSheet(
+            f"color: {TEXT_MAIN}; background: transparent;"
+        )
+        difficulty_row.addWidget(difficulty_label)
+        difficulty_row.addWidget(self.difficulty_combo, stretch=1)
+        config_layout.addLayout(difficulty_row)
+
+        root.addWidget(config_card)
+
         summary = QLabel(
             "1 Game = 3 Stage  |  5 Pattern/Stage  |  15 Pattern/Match"
         )
@@ -131,8 +195,46 @@ class LobbyScreen(QWidget):
             }}
             """
         )
-        self.start_button.clicked.connect(on_start)
+        self.start_button.clicked.connect(self._emit_start)
         root.addWidget(self.start_button, alignment=Qt.AlignCenter)
+
+    def _emit_start(self, checked=False):
+        """Emit the selected game configuration to the controller."""
+        del checked
+        self._on_start(
+            self.selected_grid_size(),
+            self.selected_difficulty(),
+        )
+
+    def selected_grid_size(self):
+        """Return the currently selected grid size."""
+        return GridSize(self.grid_size_combo.currentData())
+
+    def selected_difficulty(self):
+        """Return the currently selected difficulty."""
+        return Difficulty(self.difficulty_combo.currentData())
+
+    def set_grid_size(self, grid_size):
+        """Select a grid size in the lobby UI."""
+        if not isinstance(grid_size, GridSize):
+            raise TypeError("grid_size harus berupa GridSize")
+
+        index = self.grid_size_combo.findData(grid_size)
+        if index < 0:
+            raise ValueError(f"Grid size tidak tersedia: {grid_size}")
+
+        self.grid_size_combo.setCurrentIndex(index)
+
+    def set_difficulty(self, difficulty):
+        """Select a difficulty in the lobby UI."""
+        if not isinstance(difficulty, Difficulty):
+            raise TypeError("difficulty harus berupa Difficulty")
+
+        index = self.difficulty_combo.findData(difficulty)
+        if index < 0:
+            raise ValueError(f"Difficulty tidak tersedia: {difficulty}")
+
+        self.difficulty_combo.setCurrentIndex(index)
 
     def set_player_status(self, player_id, status, message=None):
         """Update one player's status.

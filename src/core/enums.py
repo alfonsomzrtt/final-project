@@ -1,6 +1,6 @@
 """Application enums."""
 
-from enum import Enum, auto
+from enum import Enum, IntEnum, auto
 
 
 class GamePhase(Enum):
@@ -15,6 +15,11 @@ class Difficulty(Enum):
     EASY = auto()
     NORMAL = auto()
     HARD = auto()
+
+
+class GridSize(IntEnum):
+    TWO_BY_TWO = 2
+    THREE_BY_THREE = 3
 
 
 class Player(Enum):

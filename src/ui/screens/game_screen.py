@@ -1,6 +1,6 @@
 """Gameplay screen for the Block Design Puzzle Game."""
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
     QFrame,
@@ -37,8 +37,8 @@ class GameScreen(QWidget):
     Those responsibilities remain with the controller and vision worker.
 
     Args:
-        on_done: Callback called once when a pattern is resolved. It receives
-            ``correct`` and ``time_left`` keyword arguments.
+        on_done: Callback called once when a pattern is matched. It receives
+            ``correct`` and ``accuracy`` keyword arguments.
     """
 
     def __init__(self, on_done):
@@ -48,8 +48,7 @@ class GameScreen(QWidget):
             raise TypeError("on_done harus berupa callable")
 
         self.on_done = on_done
-        self._remaining = 30
-        self._duration = 30
+        self._displayed_remaining = 30
         self._resolved = True
 
         self.setObjectName("GameScreen")
@@ -62,10 +61,6 @@ class GameScreen(QWidget):
             }}
             """
         )
-
-        self._timer = QTimer(self)
-        self._timer.setInterval(1000)
-        self._timer.timeout.connect(self._tick)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -269,13 +264,16 @@ class GameScreen(QWidget):
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         return frame
 
-    @property
-    def remaining_seconds(self):
-        return self._remaining
+
 
     @property
-    def is_running(self):
-        return self._timer.isActive()
+    def is_resolved(self):
+        return self._resolved
+
+    @property
+    def remaining_seconds(self):
+        """Return the remaining seconds currently shown by the UI."""
+        return self._displayed_remaining
 
     def start(
         self,
@@ -295,17 +293,13 @@ class GameScreen(QWidget):
         if type(seconds) is not int or seconds <= 0:
             raise ValueError("seconds harus integer positif")
 
-        self._timer.stop()
-        self._remaining = seconds
-        self._duration = seconds
         self._resolved = False
 
         self.stage_label.setText(
             f"Stage {stage} — Pattern {pattern_in_stage}/5"
         )
-        self.timer_label.setText(f"⏱  {seconds}s")
         self.time_bar.setRange(0, seconds)
-        self.time_bar.setValue(seconds)
+        self.set_time_remaining(seconds)
         self.pattern_grid.set_grid(grid)
         self.detection_label.setText("Pattern Detection: SCANNING...")
         self.log.clear()
@@ -315,7 +309,24 @@ class GameScreen(QWidget):
         self._update_pattern_bank(global_pattern - 1, global_pattern)
 
         self._log(f"Pattern {global_pattern} ditampilkan", TEXT_DIM)
-        self._timer.start()
+
+    def set_time_remaining(self, seconds):
+        """Update the timer display from the controller's current time value."""
+        if type(seconds) is not int or seconds < 0:
+            raise ValueError("seconds harus integer nonnegatif")
+
+        self._displayed_remaining = seconds
+        self.timer_label.setText(f"⏱  {seconds}s")
+        self.time_bar.setValue(seconds)
+
+    def show_timeout(self):
+        """Display a timeout already determined by the controller."""
+        if self._resolved:
+            return
+        self._resolved = True
+        self.set_time_remaining(0)
+        self.detection_label.setText("Pattern Detection: TIMEOUT")
+        self._log("Waktu habis!", "#F4A261")
 
     def set_scores(self, player1, player2):
         """Update the displayed scores."""
@@ -368,25 +379,10 @@ class GameScreen(QWidget):
                     "border: 1px solid #27313B; border-radius: 3px;"
                 )
 
-    def _tick(self):
-        if self._remaining > 0:
-            self._remaining -= 1
-
-        self.timer_label.setText(f"⏱  {self._remaining}s")
-        self.time_bar.setValue(self._remaining)
-
-        if self._remaining <= 0:
-            self._timer.stop()
-            self._log("Waktu habis!", "#F4A261")
-            self._finish(correct=False, time_left=0)
-
     def _sim_correct(self):
-        if not self._timer.isActive() or self._resolved:
+        if self._resolved:
             return
-        self.detection_label.setText("Pattern Detection: MATCHED")
-        self._log(f"Pattern benar! Sisa {self._remaining}s", GREEN)
-        self._timer.stop()
-        self._finish(correct=True, time_left=self._remaining)
+        self.receive_detection(correct=True, accuracy=1.0)
 
     def receive_detection(self, correct, accuracy):
         """Receive a result from the vision pipeline."""
@@ -394,25 +390,29 @@ class GameScreen(QWidget):
             raise TypeError("correct harus bool")
         if isinstance(accuracy, bool) or not isinstance(accuracy, (int, float)):
             raise TypeError("accuracy harus berupa angka")
-        if not 0 <= accuracy <= 100:
-            raise ValueError("accuracy harus berada pada rentang 0–100")
+        if not 0.0 <= accuracy <= 1.0:
+            raise ValueError("accuracy harus berada pada rentang 0.0–1.0")
         if self._resolved:
             return
 
-        self._timer.stop()
         label = "MATCHED" if correct else "NOT MATCHED"
         color = GREEN if correct else ACCENT
+        displayed_accuracy = accuracy * 100
         self.detection_label.setText(
-            f"Pattern Detection: {label} • {accuracy:.1f}%"
+            f"Pattern Detection: {label} • {displayed_accuracy:.1f}%"
         )
-        self._log(f"{'OK' if correct else 'MISS'} {accuracy:.1f}%", color)
-        self._finish(correct=correct, time_left=self._remaining)
+        self._log(
+            f"{'OK' if correct else 'MISS'} {displayed_accuracy:.1f}%",
+            color,
+        )
+        if correct:
+            self._finish(correct=True, accuracy=accuracy)
 
-    def _finish(self, correct, time_left):
+    def _finish(self, correct, accuracy):
         if self._resolved:
             return
         self._resolved = True
-        self.on_done(correct=correct, time_left=time_left)
+        self.on_done(correct=correct, accuracy=accuracy)
 
     def _log(self, message, color=TEXT_MAIN):
         item = QListWidgetItem(message)
@@ -422,5 +422,5 @@ class GameScreen(QWidget):
             self.log.takeItem(self.log.count() - 1)
 
     def stop(self):
-        """Stop the countdown without resolving the current pattern."""
-        self._timer.stop()
+        """Stop accepting detections for the current presentation."""
+        self._resolved = True

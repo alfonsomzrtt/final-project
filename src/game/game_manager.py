@@ -1,7 +1,9 @@
 """Game lifecycle authority."""
 
+import math
+
 from config.constants import PATTERNS_PER_STAGE, TOTAL_STAGES
-from core.enums import GamePhase, Difficulty, Player
+from core.enums import Difficulty, GamePhase, GridSize, Player
 from core.results import PatternResult
 from core.state import GameState
 from game.puzzle_loader import PuzzleLoader
@@ -19,14 +21,25 @@ class GameManager:
         self.scoring = Scoring()
         self.timer = GameTimer()
 
-    def start_game(self, difficulty: Difficulty):
+    def start_game(self, grid_size: GridSize, difficulty: Difficulty):
+        if not isinstance(grid_size, GridSize):
+            raise TypeError("grid_size must be a GridSize")
+        if not isinstance(difficulty, Difficulty):
+            raise TypeError("difficulty must be a Difficulty")
+        if grid_size not in self.puzzle_loader.supported_grid_sizes:
+            raise NotImplementedError(
+                f"Pattern bank untuk grid size {grid_size.value}x"
+                f"{grid_size.value} belum tersedia."
+            )
+
         self.state = GameState(
             phase=GamePhase.PLAYING,
+            grid_size=grid_size,
             difficulty=difficulty,
             active_player=Player.PLAYER_1,
         )
         self.puzzle_loader.reset()
-        self.puzzle_loader.load_game_patterns(difficulty)
+        self.puzzle_loader.load_game_patterns(grid_size, difficulty)
         self.timer.reset()
         self.timer.set_difficulty(difficulty)
 
@@ -34,8 +47,46 @@ class GameManager:
         self.state.phase = GamePhase.PLAYING
         self.timer.start()
 
-    def complete_pattern(self, result: PatternResult):
+    def complete_pattern(self, correct: bool, accuracy: float) -> PatternResult:
+        """Complete a running pattern using detection data and timer values."""
+        if not isinstance(correct, bool):
+            raise TypeError("correct must be bool")
+        if isinstance(accuracy, bool) or not isinstance(accuracy, (int, float)):
+            raise TypeError("accuracy must be a number")
+        if not 0.0 <= accuracy <= 1.0:
+            raise ValueError("accuracy must be between 0.0 and 1.0")
+        if not self.timer.running:
+            raise RuntimeError("no pattern is currently running")
+
         self.timer.stop()
+        elapsed_time = self.timer.elapsed_time()
+        remaining_time = self.timer.remaining_time()
+        time_left = math.floor(remaining_time)
+        result = PatternResult(
+            correct=correct,
+            accuracy=accuracy,
+            elapsed_time=elapsed_time,
+            time_left=time_left,
+            score=self.scoring.pattern_points(correct, time_left),
+        )
+        return self._complete_pattern_result(result)
+
+    def timeout_pattern(self) -> PatternResult | None:
+        """Complete the running pattern only after its timer has expired."""
+        if not self.timer.running or not self.timer.is_expired():
+            return None
+
+        self.timer.stop()
+        result = PatternResult(
+            correct=False,
+            accuracy=0.0,
+            elapsed_time=self.timer.time_limit,
+            time_left=0,
+            score=0,
+        )
+        return self._complete_pattern_result(result)
+
+    def _complete_pattern_result(self, result: PatternResult) -> PatternResult:
         player = self.state.active_player
         points = result.score
 
@@ -52,15 +103,16 @@ class GameManager:
 
         if self.state.current_pattern < PATTERNS_PER_STAGE:
             self.state.current_pattern += 1
-            return
+            return result
 
         if player == Player.PLAYER_1:
             self.state.active_player = Player.PLAYER_2
             self.state.current_pattern = 1
             self.timer.reset()
-            return
+            return result
 
         self._complete_stage()
+        return result
 
     def _complete_stage(self):
         winner = self.scoring.determine_stage_winner(
@@ -69,6 +121,7 @@ class GameManager:
             self.state.stage_score_player_1,
             self.state.stage_score_player_2,
         )
+        self.state.stage_winner = winner
 
         if winner == Player.PLAYER_1:
             self.state.stage_wins_player_1 += 1
@@ -99,6 +152,7 @@ class GameManager:
         self.state.stage_score_player_2 = 0
         self.state.stage_time_player_1 = 0.0
         self.state.stage_time_player_2 = 0.0
+        self.state.stage_winner = None
         self.state.pattern_progress_player_1 = 0
         self.state.pattern_progress_player_2 = 0
         self.timer.reset()
@@ -151,6 +205,13 @@ class GameManager:
         return self.puzzle_loader.get_pattern(
             self.state.current_stage,
             self.state.current_pattern,
+        )
+
+    def get_current_pattern_grid(self):
+        """Return the matrix for the active pattern."""
+        return self.puzzle_loader.get_pattern_matrix(
+            self.get_current_pattern(),
+            self.state.grid_size,
         )
 
     def reset_game(self):

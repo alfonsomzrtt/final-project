@@ -19,6 +19,7 @@ class GameTimer:
     def __init__(self):
         self.time_limit = 0
         self.start_time = None
+        self._elapsed_snapshot = 0.0
         self.running = False
 
     def set_difficulty(self, difficulty: Difficulty):
@@ -36,26 +37,30 @@ class GameTimer:
         """Start the timer."""
 
         self.start_time = time.monotonic()
+        self._elapsed_snapshot = 0.0
         self.running = True
 
     def stop(self):
         """Stop the timer."""
 
+        if self.running:
+            self._elapsed_snapshot = self.elapsed_time()
         self.running = False
 
     def reset(self):
         """Reset the timer."""
 
         self.start_time = None
+        self._elapsed_snapshot = 0.0
         self.running = False
 
     def elapsed_time(self) -> float:
         """Return elapsed time in seconds."""
 
-        if self.start_time is None:
-            return 0.0
+        if self.running and self.start_time is not None:
+            return time.monotonic() - self.start_time
 
-        return time.monotonic() - self.start_time
+        return self._elapsed_snapshot
 
     def remaining_time(self) -> float:
         """Return remaining time in seconds."""
