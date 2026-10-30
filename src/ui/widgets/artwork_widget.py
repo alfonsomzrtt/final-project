@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPixmap
+from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtWidgets import QWidget
 
 
@@ -55,7 +55,6 @@ class ArtworkWidget(QWidget):
         scaled = self._pixmap.scaled(
             target.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
-        image_rect = QPainterPath()
         x = target.x() + (target.width() - scaled.width()) // 2
         y = target.y() + (target.height() - scaled.height()) // 2
         from PyQt5.QtCore import QRect
@@ -69,13 +68,14 @@ class ArtworkWidget(QWidget):
             if region_id in self._revealed:
                 continue
             row, col = divmod(region_id, self.COLUMNS)
-            cell = destination.adjusted(0, 0, 0, 0)
             left = round(destination.x() + col * cell_w)
             top = round(destination.y() + row * cell_h)
             right = round(destination.x() + (col + 1) * cell_w)
             bottom = round(destination.y() + (row + 1) * cell_h)
-            painter.fillRect(left, top, right - left, bottom - top,
-                             QColor(8, 14, 22, 238))
+            painter.fillRect(
+                left, top, right - left, bottom - top,
+                QColor(8, 14, 22, 238),
+            )
         painter.setPen(QColor("#526170"))
         painter.drawRect(destination.adjusted(0, 0, -1, -1))
         painter.end()
