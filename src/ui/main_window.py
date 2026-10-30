@@ -223,10 +223,9 @@ class MainWindow(QMainWindow):
         self._handle_manager_phase()
 
     def _complete_pattern(self, correct, accuracy):
-        """Complete a pattern and reveal once after Player 2 finishes its turn."""
-        completing_player = self.game_manager.state.active_player
+        """Complete a pattern and reveal one artwork region on every success."""
         self.game_manager.complete_pattern(correct, accuracy)
-        if correct and completing_player == Player.PLAYER_2:
+        if correct:
             self.game_screen.reveal_artwork_region()
 
     def _handle_manager_phase(self):
