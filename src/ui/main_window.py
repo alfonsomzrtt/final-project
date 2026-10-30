@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
 
     def _on_lobby_start(self, grid_size: GridSize, difficulty: Difficulty):
         """Start the first pattern for the selected game configuration."""
+        self.game_screen.reset_artwork()
         self.game_manager.start_game(grid_size, difficulty)
         self.game_manager.start_pattern()
         self._start_camera()
@@ -144,7 +145,7 @@ class MainWindow(QMainWindow):
 
         accuracy = result.stabilization.check_result.accuracy
         self.timer_refresh.stop()
-        self.game_manager.complete_pattern(True, accuracy)
+        self._complete_pattern(True, accuracy)
         self._handle_manager_phase()
 
     def _accept_vision_result(self, result):
@@ -218,8 +219,15 @@ class MainWindow(QMainWindow):
             raise TypeError("accuracy event must be a number")
 
         self.timer_refresh.stop()
-        self.game_manager.complete_pattern(correct, accuracy)
+        self._complete_pattern(correct, accuracy)
         self._handle_manager_phase()
+
+    def _complete_pattern(self, correct, accuracy):
+        """Complete a pattern and reveal once after Player 2 finishes its turn."""
+        completing_player = self.game_manager.state.active_player
+        self.game_manager.complete_pattern(correct, accuracy)
+        if correct and completing_player == Player.PLAYER_2:
+            self.game_screen.reveal_artwork_region()
 
     def _handle_manager_phase(self):
         """Render the screen selected by the GameManager phase."""
