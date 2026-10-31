@@ -23,7 +23,7 @@ DEBUG = True
 # CAMERA
 # ============================================================
 
-CAMERA_INDEX = 2
+CAMERA_INDEX = 0
 
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
