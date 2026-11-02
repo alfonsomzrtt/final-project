@@ -95,7 +95,7 @@ class PatternGrid(QWidget):
     def set_grid(self, grid):
         """Memperbarui pola yang ditampilkan."""
         self.grid = self._validate_grid(grid)
-        self._update_size()
+        self.updateGeometry()
         self.update()
 
     def set_cell_size(self, cell_size):
@@ -107,7 +107,7 @@ class PatternGrid(QWidget):
             return
 
         self.cell_size = cell_size
-        self._update_size()
+        self.updateGeometry()
         self.update()
 
     def _draw_cell(self, painter, x, y, cell_class):
