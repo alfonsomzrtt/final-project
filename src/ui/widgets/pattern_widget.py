@@ -7,7 +7,7 @@ from PyQt5.QtGui import (
     QPen,
     QPolygon,
 )
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QSizePolicy, QWidget
 
 from config.constants import (
     BLOCK_CLASS_RED,
@@ -49,11 +49,13 @@ class PatternGrid(QWidget):
             raise ValueError("cell_size harus berupa integer >= 10.")
 
         self.cell_size = cell_size
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(180, 180)
         self.grid = self._validate_grid(
             grid if grid is not None else self.DEFAULT_GRID
         )
 
-        self._update_size()
+        self.updateGeometry()
 
     @staticmethod
     def _validate_grid(grid):
@@ -93,7 +95,7 @@ class PatternGrid(QWidget):
     def set_grid(self, grid):
         """Memperbarui pola yang ditampilkan."""
         self.grid = self._validate_grid(grid)
-        self._update_size()
+        self.updateGeometry()
         self.update()
 
     def set_cell_size(self, cell_size):
@@ -105,14 +107,8 @@ class PatternGrid(QWidget):
             return
 
         self.cell_size = cell_size
-        self._update_size()
+        self.updateGeometry()
         self.update()
-
-    def _update_size(self):
-        size = len(self.grid)
-        total_size = size * self.cell_size + 4
-
-        self.setFixedSize(total_size, total_size)
 
     def _draw_cell(self, painter, x, y, cell_class):
         """Menggambar satu sel berdasarkan kelas blok."""
@@ -167,15 +163,23 @@ class PatternGrid(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        grid_size = len(self.grid)
+        available = min(self.width(), self.height()) - 4
+        cell_size = max(1, available // grid_size)
+        total_size = grid_size * cell_size
+        offset_x = (self.width() - total_size) // 2
+        offset_y = (self.height() - total_size) // 2
+
         for row_index, row in enumerate(self.grid):
             for col_index, cell_class in enumerate(row):
-                x = col_index * self.cell_size + 2
-                y = row_index * self.cell_size + 2
+                x = offset_x + col_index * cell_size + 2
+                y = offset_y + row_index * cell_size + 2
 
                 self._draw_cell(
                     painter,
                     x,
                     y,
+                    cell_size,
                     cell_class,
                 )
 

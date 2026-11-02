@@ -176,6 +176,8 @@ class CameraWidget(QWidget):
         self.adjustment_group.toggled.connect(
             self._toggle_adjustment_visibility
         )
+        # Keep the preview dominant; controls remain available on demand.
+        self.adjustment_group.setChecked(False)
 
         parent_layout.addWidget(self.adjustment_group)
 

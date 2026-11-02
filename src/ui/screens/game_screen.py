@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui.widgets.camera_widget import CameraWidget
+from ui.widgets.artwork_widget import ArtworkWidget
 from ui.widgets.pattern_widget import PatternGrid
 
 
@@ -184,13 +185,8 @@ class GameScreen(QWidget):
         artwork_header.addWidget(self.artwork_count_label)
         artwork_layout.addLayout(artwork_header)
 
-        self.artwork_placeholder = QLabel("Artwork akan ditampilkan di sini")
-        self.artwork_placeholder.setAlignment(Qt.AlignCenter)
-        self.artwork_placeholder.setMinimumHeight(100)
-        self.artwork_placeholder.setStyleSheet(
-            f"background: #111820; color: {TEXT_DIM}; border-radius: 5px;"
-        )
-        artwork_layout.addWidget(self.artwork_placeholder, 1)
+        self.artwork_widget = ArtworkWidget()
+        artwork_layout.addWidget(self.artwork_widget, 1)
         right.addWidget(artwork_frame, 7)
 
         lower_frame = self._make_card()
@@ -304,9 +300,8 @@ class GameScreen(QWidget):
         self.detection_label.setText("Pattern Detection: SCANNING...")
         self.log.clear()
 
-        self.artwork_count_label.setText(f"{global_pattern - 1} / 15")
         self.pattern_count_label.setText(f"{global_pattern} / 15")
-        self._update_pattern_bank(global_pattern - 1, global_pattern)
+        self._update_pattern_bank(self.artwork_widget.revealed_count, global_pattern)
 
         self._log(f"Pattern {global_pattern} ditampilkan", TEXT_DIM)
 
@@ -357,6 +352,15 @@ class GameScreen(QWidget):
         if current is not None:
             self.pattern_count_label.setText(f"{current} / 15")
         self._update_pattern_bank(completed, current)
+
+    def reveal_artwork_region(self):
+        """Reveal the next artwork region and synchronize progress labels."""
+        self.artwork_widget.reveal_next()
+        self.set_progress(self.artwork_widget.revealed_count)
+
+    def reset_artwork(self):
+        self.artwork_widget.reset()
+        self.set_progress(0, 1)
 
     def _update_pattern_bank(self, completed, current):
         for index, item in enumerate(self.pattern_bank_labels, start=1):
