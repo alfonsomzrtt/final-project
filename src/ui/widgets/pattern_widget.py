@@ -49,11 +49,13 @@ class PatternGrid(QWidget):
             raise ValueError("cell_size harus berupa integer >= 10.")
 
         self.cell_size = cell_size
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(180, 180)
         self.grid = self._validate_grid(
             grid if grid is not None else self.DEFAULT_GRID
         )
 
-        self._update_size()
+        self.updateGeometry()
 
     @staticmethod
     def _validate_grid(grid):
