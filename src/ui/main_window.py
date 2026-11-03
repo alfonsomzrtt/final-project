@@ -14,6 +14,8 @@ from ui.screens.lobby_screen import LobbyScreen
 from ui.screens.stage_result_screen import StageResultScreen
 from ui.workers.camera_worker import CameraWorker, VISION_STABLE
 
+from config.user_preferences import UserPreferences
+
 
 class MainWindow(QMainWindow):
     """Orchestrate screen navigation around a single game manager."""
@@ -44,9 +46,34 @@ class MainWindow(QMainWindow):
 
         self.lobby_screen = LobbyScreen(on_start=self._on_lobby_start)
         self.game_screen = GameScreen(on_done=self._on_game_done)
-        self.game_screen.camera_widget.adjustment_changed.connect(
+
+        self.preferences = UserPreferences()
+        camera_widget = self.game_screen.camera_widget
+
+        # Restore previously saved camera configuration.
+        camera_widget.restore_preferences(
+            self.preferences.get_camera_preferences()
+        )
+
+        camera_widget.adjustment_changed.connect(
             self._on_camera_adjustment_changed
         )
+        camera_widget.camera_source_changed.connect(
+            self._on_camera_source_changed
+        )
+
+        camera_widget.transform_changed.connect(
+            self._on_camera_transform_changed
+        )
+
+        camera_widget.save_requested.connect(
+            self._save_camera_preferences
+        )
+
+        self.game_screen.camera_widget.transform_changed.connect(
+            self._on_camera_transform_changed
+        )
+        
         self.stage_result_screen = StageResultScreen(
             on_next=self._on_stage_next
         )
@@ -89,13 +116,21 @@ class MainWindow(QMainWindow):
         self.timer_refresh.start()
         self.show_game()
 
-    def _start_camera(self):
+    def _start_camera(self, camera_source=None):
         """Start one camera worker for the current game session."""
         if self.camera_worker is not None and self.camera_worker.isRunning():
             return
 
         self.camera_worker = CameraWorker(
             self,
+            camera_index=(
+                camera_source
+                if camera_source is not None
+                else (
+                    self.game_screen.camera_widget
+                    .camera_source_combo.currentData()
+                )
+            ),
             grid_bounds=self.vision_grid_bounds,
             raw_frame_snapshot_dir=(
                 self.vision_raw_frame_snapshot_dir
@@ -110,14 +145,35 @@ class MainWindow(QMainWindow):
         )
         self.camera_worker.error.connect(self._on_camera_error)
         self._set_camera_target(self.game_manager.get_current_pattern_grid())
+        self.camera_worker.set_transform(
+            "horizontal",
+            self.game_screen.camera_widget.mirror_horizontal.isChecked(),
+        )
+        self.camera_worker.set_transform(
+            "vertical",
+            self.game_screen.camera_widget.mirror_vertical.isChecked(),
+        )
         self.camera_worker.start()
+
+    def _on_camera_source_changed(self, camera_source):
+        """Switch the capture source without changing the active pattern."""
+        if self.camera_worker is None or not self.camera_worker.isRunning():
+            return
+
+        self._stop_camera()
+        self._start_camera(camera_source)
 
     def _set_camera_target(self, target_pattern):
         """Set the worker target and advance the UI-side result generation."""
+        worker = self.camera_worker
+
+        if worker is None:
+            return
+        
         self._vision_target_generation += 1
         self._accepted_vision_key = None
         self._accepted_vision_accuracy = None
-        self.camera_worker.set_vision_target(target_pattern)
+        worker.set_vision_target(target_pattern)
 
     def _stop_camera(self):
         """Stop the worker and wait for its capture resource to release."""
@@ -130,10 +186,29 @@ class MainWindow(QMainWindow):
                 raise RuntimeError("Camera worker did not stop cleanly")
         self.camera_worker = None
 
+    def _save_camera_preferences(self):
+        preferences = (
+            self.game_screen.camera_widget.get_camera_preferences()
+        )
+
+        for name, value in preferences.items():
+            self.preferences.save_camera_preference(
+                name,
+                value
+            )
+
+        self.preferences.sync()
+
+        self.game_screen.camera_widget.save_button.setText("Pengaturan Tersimpan ✓")
+
     def _on_camera_adjustment_changed(self, name, value):
         if self.camera_worker is not None and self.camera_worker.isRunning():
             self.camera_worker.set_adjustment(name, value)
 
+    def _on_camera_transform_changed(self, name, enabled):
+        if self.camera_worker is not None and self.camera_worker.isRunning():
+            self.camera_worker.set_transform(name, enabled)
+            
     def _on_camera_error(self, message):
         self.game_screen.set_camera_status("error", message)
 
@@ -239,13 +314,22 @@ class MainWindow(QMainWindow):
             self.show_game_result()
         elif self.game_manager.state.phase == GamePhase.STAGE_RESULT:
             state = self.game_manager.state
+            
             winner_labels = {
                 Player.PLAYER_1: "Player 1",
                 Player.PLAYER_2: "Player 2",
             }
+
+            winner = state.stage_winner
+            winner_label = (
+                winner_labels.get(winner, "Seri")
+                if winner is not None
+                else "Seri"
+            )
+
             self.stage_result_screen.update(
                 stage=state.current_stage,
-                winner=winner_labels.get(state.stage_winner, "Seri"),
+                winner=winner_label,
                 wins_p1=state.stage_wins_player_1,
                 wins_p2=state.stage_wins_player_2,
                 score_p1=state.stage_score_player_1,

@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from PyQt5.QtCore import QThread, pyqtSignal
-from config.settings import DETECTION_FPS
+from config.settings import CAMERA_INDEX, DETECTION_FPS
 from vision.camera import Camera
 from vision.grid_pattern_checker import GridPatternChecker
 from vision.pattern_stabilizer import PatternStabilizer
@@ -60,6 +60,7 @@ class CameraWorker(QThread):
         self,
         parent=None,
         detector_factory=YoloDetector,
+        camera_index=CAMERA_INDEX,
         grid_bounds=None,
         minimum_matches=3,
         raw_frame_snapshot_dir=None,
@@ -67,7 +68,12 @@ class CameraWorker(QThread):
         super().__init__(parent)
         self._stop_event = Event()
         self._adjustments = Queue()
+
+        self._transforms = Queue()
+        self._mirror_horizontal = False
+        self._mirror_vertical = False
         self._detector_factory = detector_factory
+        self._camera_index = camera_index
         self._inference_queue = Queue(maxsize=1)
         self._frame_id = 0
         self._last_processed_frame_id = 0
@@ -114,6 +120,40 @@ class CameraWorker(QThread):
 
     def set_adjustment(self, name: str, value: int):
         self._adjustments.put((name, value))
+
+
+    def set_transform(self, name: str, enabled: bool):
+        if name not in {"horizontal", "vertical"}:
+            raise ValueError(f"Unsupported transform: {name}")
+
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be bool")
+
+        self._transforms.put((name, enabled))
+
+
+    def _apply_transforms(self, frame):
+        while True:
+            try:
+                name, enabled = self._transforms.get_nowait()
+            except Empty:
+                break
+
+            if name == "horizontal":
+                self._mirror_horizontal = enabled
+            elif name == "vertical":
+                self._mirror_vertical = enabled
+
+        if self._mirror_horizontal and self._mirror_vertical:
+            return cv2.flip(frame, -1)
+
+        if self._mirror_horizontal:
+            return cv2.flip(frame, 1)
+
+        if self._mirror_vertical:
+            return cv2.flip(frame, 0)
+
+        return frame
 
     def _apply_adjustments(self, camera):
         while True:
@@ -500,7 +540,7 @@ class CameraWorker(QThread):
                 pass
 
     def run(self):
-        camera = Camera()
+        camera = Camera(camera_index=self._camera_index)
         connected = False
         inference_interval = 1.0 / max(1, DETECTION_FPS)
         next_inference = 0.0
@@ -533,6 +573,8 @@ class CameraWorker(QThread):
                 # tried automatically.
                 if self._raw_frame_snapshot_path is None:
                     self._save_raw_frame(self._frame_id + 1, frame)
+                
+                frame = self._apply_transforms(frame)
 
                 now = time.monotonic()
                 if (

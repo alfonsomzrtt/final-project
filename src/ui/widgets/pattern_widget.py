@@ -50,7 +50,7 @@ class PatternGrid(QWidget):
 
         self.cell_size = cell_size
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(180, 180)
+        self.setMinimumSize(340, 340)
         self.grid = self._validate_grid(
             grid if grid is not None else self.DEFAULT_GRID
         )
@@ -110,9 +110,8 @@ class PatternGrid(QWidget):
         self.updateGeometry()
         self.update()
 
-    def _draw_cell(self, painter, x, y, cell_class):
+    def _draw_cell(self, painter, x, y, size, cell_class):
         """Menggambar satu sel berdasarkan kelas blok."""
-        size = self.cell_size
         rect = QRect(x, y, size - 2, size - 2)
 
         painter.setPen(Qt.NoPen)

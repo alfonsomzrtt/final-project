@@ -24,7 +24,10 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QSizePolicy,
     QFormLayout,
+    QCheckBox,
+    QComboBox,
 )
+from vision.camera import list_camera_sources
 
 from config.settings import (
     CAMERA_SLIDER_BOUNDS,
@@ -53,6 +56,11 @@ class CameraWidget(QWidget):
     """
 
     adjustment_changed = pyqtSignal(str, int)
+    
+    transform_changed = pyqtSignal(str, bool)
+    
+    save_requested = pyqtSignal()
+    camera_source_changed = pyqtSignal(object)
 
     ADJUSTMENT_NAMES = (
         "brightness",
@@ -70,9 +78,11 @@ class CameraWidget(QWidget):
         super().__init__(parent)
 
         self._frame = None
+        self._zoom_factor = 1.0
         self._sliders = {}
         self._value_labels = {}
         self._adjustment_rows = {}
+        self._build_camera_sources()
 
         self._build_ui()
 
@@ -88,6 +98,16 @@ class CameraWidget(QWidget):
         self._build_video_display(main_layout)
         self._build_status(main_layout)
         self._build_adjustments(main_layout)
+
+    def _build_camera_sources(self):
+        self.camera_source_combo = QComboBox()
+        for label, source in list_camera_sources():
+            self.camera_source_combo.addItem(label, source)
+        self.camera_source_combo.currentIndexChanged.connect(
+            lambda index: self.camera_source_changed.emit(
+                self.camera_source_combo.itemData(index)
+            )
+        )
 
     def _build_video_display(self, parent_layout):
         self.video_label = QLabel("Camera feed unavailable")
@@ -114,6 +134,23 @@ class CameraWidget(QWidget):
 
     
     def _build_status(self, parent_layout):
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("Camera Source"))
+        source_row.addWidget(self.camera_source_combo, stretch=1)
+        parent_layout.addLayout(source_row)
+
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(QLabel("Camera Zoom"))
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItem("1.0x", 1.0)
+        self.zoom_combo.addItem("1.5x", 1.5)
+        self.zoom_combo.addItem("2.0x", 2.0)
+        self.zoom_combo.currentIndexChanged.connect(
+            self._on_zoom_changed
+        )
+        zoom_row.addWidget(self.zoom_combo, stretch=1)
+        parent_layout.addLayout(zoom_row)
+
         self.status_label = QLabel()
         self.status_label.setAlignment(
             Qt.AlignLeft | Qt.AlignVCenter
@@ -121,6 +158,10 @@ class CameraWidget(QWidget):
 
         self.set_camera_status("disconnected")
         parent_layout.addWidget(self.status_label)
+
+    def _on_zoom_changed(self, index):
+        self._zoom_factor = self.zoom_combo.itemData(index)
+        self._render_frame()
 
 
 
@@ -163,6 +204,25 @@ class CameraWidget(QWidget):
 
         body_layout.addLayout(form_layout)
 
+        # Software image orientation controls
+        self.mirror_horizontal = QCheckBox("Mirror Horizontal (Left ↔ Right)")
+        self.mirror_vertical = QCheckBox("Mirror Vertical (Top ↔ Bottom)")
+
+        self.mirror_horizontal.toggled.connect(
+            lambda checked: self.transform_changed.emit(
+                "horizontal", checked
+            )
+        )
+
+        self.mirror_vertical.toggled.connect(
+            lambda checked: self.transform_changed.emit(
+                "vertical", checked
+            )
+        )
+
+        body_layout.addWidget(self.mirror_horizontal)
+        body_layout.addWidget(self.mirror_vertical)
+
         self.reset_button = QPushButton(
             "Reset to Default"
         )
@@ -170,6 +230,13 @@ class CameraWidget(QWidget):
             self.reset_adjustments
         )
         body_layout.addWidget(self.reset_button)
+
+        self.save_button = QPushButton("Simpan Pengaturan")
+        self.save_button.clicked.connect(
+            self.save_requested.emit
+        )
+
+        body_layout.addWidget(self.save_button)
 
         group_layout.addWidget(self.adjustment_body)
 
@@ -217,6 +284,40 @@ class CameraWidget(QWidget):
         row_layout.addWidget(value_label)
 
         return row, slider, value_label
+
+
+    def restore_preferences(self, preferences):
+        """Restore saved camera preferences without emitting signals."""
+
+        for name in self.ADJUSTMENT_NAMES:
+            slider = self._sliders[name]
+            slider.blockSignals(True)
+            slider.setValue(preferences[name])
+            slider.blockSignals(False)
+
+            self._update_value_label(
+                self._value_labels[name],
+                slider.value()
+            )
+
+        self.mirror_horizontal.blockSignals(True)
+        self.mirror_horizontal.setChecked(
+            preferences["mirror_horizontal"]
+        )
+        self.mirror_horizontal.blockSignals(False)
+
+        self.mirror_vertical.blockSignals(True)
+        self.mirror_vertical.setChecked(
+            preferences["mirror_vertical"]
+        )
+        self.mirror_vertical.blockSignals(False)
+
+    def get_camera_preferences(self):
+        return {
+            **self.get_raw_adjustments(),
+            "mirror_horizontal": self.mirror_horizontal.isChecked(),
+            "mirror_vertical": self.mirror_vertical.isChecked(),
+        }
 
     # ==================================================
     # SLIDER MAPPING
@@ -377,6 +478,12 @@ class CameraWidget(QWidget):
             return
 
         pixmap = QPixmap.fromImage(self._frame)
+        if self._zoom_factor > 1.0:
+            width = max(1, round(pixmap.width() / self._zoom_factor))
+            height = max(1, round(pixmap.height() / self._zoom_factor))
+            x = (pixmap.width() - width) // 2
+            y = (pixmap.height() - height) // 2
+            pixmap = pixmap.copy(x, y, width, height)
 
         scaled = pixmap.scaled(
             self.video_label.size(),

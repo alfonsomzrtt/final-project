@@ -111,7 +111,7 @@ class GameScreen(QWidget):
 
         self.pattern_grid = PatternGrid()
         target_layout.addWidget(self.pattern_grid, 1, Qt.AlignCenter)
-        left.addWidget(target_frame, 3)
+        left.addWidget(target_frame, 2)
 
         camera_frame = self._make_card()
         camera_layout = QVBoxLayout(camera_frame)
@@ -136,7 +136,7 @@ class GameScreen(QWidget):
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
         camera_layout.addWidget(self.camera_widget, 1)
-        left.addWidget(camera_frame, 2)
+        left.addWidget(camera_frame, 3)
 
         # Right column: score, artwork placeholder, and progress/log.
         right_widget = QWidget()
